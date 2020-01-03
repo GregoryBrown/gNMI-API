@@ -7,7 +7,7 @@ from typing import List, Set, Dict, Tuple, Union, Any
 from datetime import datetime
 from uploader import ElasticSearchUploader
 from responses import ParsedGetResponse, ParsedSetRequest
-
+import json
 
         
 class GNMIManager:
@@ -56,29 +56,46 @@ class GNMIManager:
 
         
     def _get_version(self) -> GetResponse:
-        if self.gnmi_stub:
-            get_message: GetRequest = GetRequest(path=[self._create_gnmi_path("Cisco-IOS-XR-spirit-install-instmgr-oper:software-install/version")],
-                                                 type=GetRequest.DataType.Value("STATE"), encoding=Encoding.Value("JSON_IETF"))
-            response: GetResponse = self.gnmi_stub.Get(get_message, metadata=self.metadata)
-        else:
+        if not self.gnmi_stub:
             self.gnmi_stub: gNMIStub = gNMIStub(self.channel)
-            get_message: GetRequest = GetRequest(path=[self._create_gnmi_path("Cisco-IOS-XR-spirit-install-instmgr-oper:software-install/version")],
-                                                 type=GetRequest.DataType.Value("STATE"), encoding=Encoding.Value("JSON_IETF"))
-            response: GetResponse = self.gnmi_stub.Get(get_message, metadata=self.metadata)
-        return response
-    
-    def _get_config(self) -> GetResponse:
-        self.gnmi_stub: gNMIStub = gNMIStub(self.channel) 
-        get_message: GetRequest = GetRequest(path=[Path()], type=GetRequest.DataType.Value("CONFIG"), encoding=Encoding.Value("JSON_IETF"))
+        get_message: GetRequest = GetRequest(path=[self._create_gnmi_path("Cisco-IOS-XR-spirit-install-instmgr-oper:software-install/version")],
+                                             type=GetRequest.DataType.Value("STATE"), encoding=Encoding.Value("JSON_IETF"))
         response: GetResponse = self.gnmi_stub.Get(get_message, metadata=self.metadata)
         return response
 
-
-    def get(self) -> Tuple[bool, Union[None, ParsedGetResponse]]:
+    def _get_hostname(self) -> GetResponse:
+        if not self.gnmi_stub:
+            self.gnmi_stub: gNMIStub = gNMIStub(self.channel)
+        get_message: GetRequest = GetRequest(path=[self._create_gnmi_path("Cisco-IOS-XR-shellutil-cfg:host-names")],
+                                             type=GetRequest.DataType.Value("CONFIG"), encoding=Encoding.Value("JSON_IETF"))
+        response: GetResponse = self.gnmi_stub.Get(get_message, metadata=self.metadata)
+        return response
+    
+    def get_config(self, config_model: str = None) -> Tuple[bool, Union[None, ParsedGetResponse]]:
         try:
-            full_config: GetResponse = self._get_config()
+            if config_model:
+                get_config_path = self._create_gnmi_path(config_model)
+            else:
+                get_config_path = Path()
+            self.gnmi_stub: gNMIStub = gNMIStub(self.channel) 
+            get_message: GetRequest = GetRequest(path=[get_config_path], type=GetRequest.DataType.Value("STATE"), encoding=Encoding.Value("JSON_IETF"))
+            response: GetResponse = self.gnmi_stub.Get(get_message, metadata=self.metadata)
             version: GetResponse = self._get_version()
-            return True, ParsedGetResponse(full_config, version)
+            hostname: GetResponse = self._get_hostname()
+            return True, ParsedGetResponse(response, version, hostname, config_model)
+        except Exception as e:
+            print(e)
+            return False, None
+
+
+    def get(self, oper_model: str) -> Tuple[bool, Union[None, ParsedGetResponse]]:
+        try:
+            self.gnmi_stub: gNMIStub = gNMIStub(self.channel)
+            get_message: GetRequest = GetRequest(path=[self._create_gnmi_path(oper_model)], type=GetRequest.DataType.Value("STATE"), encoding=Encoding.Value("JSON_IETF"))
+            response: GetResponse = self.gnmi_stub.Get(get_message, metadata=self.metadata)
+            version: GetResponse = self._get_version()
+            hostname: GetResponse = self._get_hostname()
+            return True, ParsedGetResponse(response, version, hostname, oper_model)
         except Exception as e:
             print(e)
             return False, None
@@ -89,11 +106,11 @@ class GNMIManager:
 def main() -> None:
     sc: GNMIManager = GNMIManager("10.8.70.51", "root", "lablab", "57400", "II11-5508-Mountain.pem")
     if sc.connect():
-        #get_complete, response = sc.get()
-        #if get_complete:
-        es = ElasticSearchUploader("2.2.2.1","9200")
-        es.download("II11-5508-Mountain", "6.6.3", "Cisco-IOS-XR-clns-isis-cfg:isis")
-        #es.upload(response)
+        get_complete, response = sc.get("Cisco-IOS-XR-ethernet-lldp-oper:lldp")
+        if get_complete:
+            es = ElasticSearchUploader("2.2.2.1","9200")
+            #es.download("II11-5508-Mountain", "6.6.3", "Cisco-IOS-XR-clns-isis-cfg:isis")
+            es.upload(response)
         #set_request: ParsedSetRequest = es.download(response.hostname, response.version)
         #if not es.upload_full_config():
         #print("Failed to put full config in ES")

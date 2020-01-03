@@ -62,16 +62,16 @@ class ElasticSearchUploader:
     def upload(self, get_data: ParsedGetResponse) -> bool:
         try:
             index_list: List[str] = self.populate_index_list()
-            for configlet in get_data.configlets:
-                index: str = configlet.pop("index")
+            for sub_response in get_data.sub_responses:
+                index: str = sub_response.pop("index")
                 if index not in index_list:
                     print(f'Putting {index} in Elasticsearch')
                     self.put_index(index)
-                self.post_data(configlet, index, int(get_data.timestamp), get_data.version, get_data.hostname)
-            feature_index = f"router-features"
-            if feature_index not in index_list:
-                self.put_index(feature_index)
-            self.post_features(get_data.configlets, feature_index, int(get_data.timestamp), get_data.version, get_data.hostname)
+                self.post_data(sub_response, index, int(get_data.timestamp), get_data.version, get_data.hostname)
+            #feature_index = f"router-features"
+            #if feature_index not in index_list:
+            #    self.put_index(feature_index)
+            #self.post_features(get_data.configlets, feature_index, int(get_data.timestamp), get_data.version, get_data.hostname)
             return True
         except (PostDataError, PutIndexError, GetIndexListError) as e:
             print(e.code)

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 def get_date() -> str:
     now: datetime = datetime.now()
     month: str = f"{now.month:02d}"
