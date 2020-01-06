@@ -11,6 +11,9 @@ from typing import List, Set, Dict, Tuple, Union, Any
 from utils import feature_name_to_index, get_date
 import json
 
+
+class ParsedSetResponse:
+    pass
 class ParsedSetRequest:
     pass
 

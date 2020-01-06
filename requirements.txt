@@ -1,0 +1,9 @@
+certifi==2019.11.28
+chardet==3.0.4
+googleapis-common-protos==1.6.0
+grpcio==1.26.0
+idna==2.8
+protobuf==3.11.2
+requests==2.22.0
+six==1.13.0
+urllib3==1.25.7

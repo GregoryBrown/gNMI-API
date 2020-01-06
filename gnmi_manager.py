@@ -6,7 +6,7 @@ from protos.gnmi_pb2 import GetRequest, GetResponse, Path, PathElem, CapabilityR
 from typing import List, Set, Dict, Tuple, Union, Any
 from datetime import datetime
 from uploader import ElasticSearchUploader
-from responses import ParsedGetResponse, ParsedSetRequest
+from responses import ParsedGetResponse, ParsedSetRequest, ParsedSetResponse
 import json
 
         
@@ -19,6 +19,8 @@ class GNMIManager:
         self.pem: str = pem
         self.options: List[Tuple[str, str]] = options
         self.metadata: List[Tuple[str, str]] = [('username', self.username), ('password', self.password)]
+        self._connected: bool = False
+
         
     def read_pem(self) -> bytes:
         with open(self.pem, "rb") as fp:
@@ -29,11 +31,13 @@ class GNMIManager:
             credentials: grpc.ssl_channel_credentials = grpc.ssl_channel_credentials(self.read_pem())
             self.channel: grpc.secure_channel = grpc.secure_channel(':'.join([self.host, self.port]), credentials, self.options)
             grpc.channel_ready_future(self.channel).result(timeout=10)
-            return True
+            self._connected = True
         except grpc.FutureTimeoutError as e:
             print(f"Unable to connect to {self.host}:{self.port}")
-            return False
-
+            
+    def is_connected(self) -> bool:
+        return self._connected
+    
     def _create_gnmi_path(self, path: str) -> Path:
         path_elements: List[str] = []
         path_list: List[str] = []
@@ -100,12 +104,13 @@ class GNMIManager:
             print(e)
             return False, None
 
-    def set(self, request: ParsedSetRequest) -> bool:
+    def set(self, request: ParsedSetRequest) -> Tuple[bool, Union[None, ParsedSetResponse]]:
         pass
         
 def main() -> None:
     sc: GNMIManager = GNMIManager("10.8.70.51", "root", "lablab", "57400", "II11-5508-Mountain.pem")
-    if sc.connect():
+    sc.connect()
+    if sc.is_connected:
         get_complete, response = sc.get("Cisco-IOS-XR-ip-ntp-oper:ntp")
         if get_complete:
             print(response.full_response)
