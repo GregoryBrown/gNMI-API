@@ -59,6 +59,7 @@ class ElasticSearchUploader:
                                 "Error while posting features")
 
         
+
     def upload(self, get_data: ParsedGetResponse) -> bool:
         try:
             index_list: List[str] = self.populate_index_list()
@@ -100,4 +101,4 @@ class ElasticSearchUploader:
             post_response = request("POST", f"{self.url}/{feature_name_to_index(feature)}*/_search", json=search_request, headers=headers)
             rc = post_response.json()
             feature_dict.update(rc["hits"]["hits"][0]['_source']["config"][0])
-        print(feature_dict)
+        return ParsedSetRequest(feature_dict)

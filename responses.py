@@ -6,17 +6,39 @@
 .. moduleauthor:: Greg Brown <gregorbr@cisco.com>
 
 """
-from protos.gnmi_pb2 import GetResponse, SetRequest
+from protos.gnmi_pb2 import GetResponse, SetRequest, Update, Path, TypedValue
 from typing import List, Set, Dict, Tuple, Union, Any
-from utils import feature_name_to_index, get_date
+from utils import feature_name_to_index, get_date, create_gnmi_path
 import json
 
 
-class ParsedSetResponse:
-    pass
 class ParsedSetRequest:
-    pass
+    """ParsedSetRequest creates the Set requests for all options (replace, update, delete)
+    :param configs: The configuration dictionary that you want to parse into Set Requests
+    :type configs: SetRequest
 
+    """
+    def __init__(self, features: Dict[str, Any]):
+        self._features = features
+        self.delete_request = SetRequest(delete=self._create_delete_paths())
+        self.update_request = SetRequest(update=self._create_updates())
+        self.replace_request = SetRequest(replace=self._create_updates())
+
+        
+    def _create_delete_paths(self) -> List[Path]:
+        paths = []
+        for key in self._features.keys():
+            paths.append(create_gnmi_path(key))
+        return paths
+
+    def _create_updates(self) -> List[Update]:
+        updates = []
+        for path, config in self._features.items():
+            str_config = json.dumps(config)
+            type_config_val = TypedValue(json_ietf_val=str_config.encode())
+            updates.append(Update(path=create_gnmi_path(path), val=type_config_val))
+        return updates
+    
 class ParsedGetResponse:
     """ParsedGetResponse uses the Get Response and parses it into version, hostname, and reponse to be uploaded.
 
@@ -56,5 +78,8 @@ class ParsedGetResponse:
     def _parse_full_response(self, response: GetResponse) -> Dict[str, Any]:
         for notification in response.notification:
             for update in notification.update:
-                rc = json.loads(update.val.json_ietf_val.decode())
-                return rc
+                rc = update.val.json_ietf_val
+                if not rc:
+                    return dict()
+                else:
+                    return json.loads(rc)

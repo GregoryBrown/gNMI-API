@@ -2,11 +2,12 @@ import grpc
 import re
 import json
 from protos.gnmi_pb2_grpc import gNMIStub
-from protos.gnmi_pb2 import GetRequest, GetResponse, Path, PathElem, CapabilityRequest, Encoding, SetRequest, Update, TypedValue
+from protos.gnmi_pb2 import GetRequest, GetResponse, Path, PathElem, CapabilityRequest, Encoding, SetRequest, Update, TypedValue, SetResponse
 from typing import List, Set, Dict, Tuple, Union, Any
 from datetime import datetime
 from uploader import ElasticSearchUploader
-from responses import ParsedGetResponse, ParsedSetRequest, ParsedSetResponse
+from responses import ParsedGetResponse, ParsedSetRequest
+from utils import create_gnmi_path
 import json
 
         
@@ -20,7 +21,7 @@ class GNMIManager:
         self.options: List[Tuple[str, str]] = options
         self.metadata: List[Tuple[str, str]] = [('username', self.username), ('password', self.password)]
         self._connected: bool = False
-
+        self.gnmi_stub:  gNMIStub = None
         
     def read_pem(self) -> bytes:
         with open(self.pem, "rb") as fp:
@@ -37,32 +38,11 @@ class GNMIManager:
             
     def is_connected(self) -> bool:
         return self._connected
-    
-    def _create_gnmi_path(self, path: str) -> Path:
-        path_elements: List[str] = []
-        path_list: List[str] = []
-        if path[0] == '/':
-            if path[-1] == '/':
-                path_list = re.split(r'''/(?=(?:[^\[\]]|\[[^\[\]]+\])*$)''', path)[1:-1]
-            else:
-                path_list = re.split(r'''/(?=(?:[^\[\]]|\[[^\[\]]+\])*$)''', path)[1:]
-        else:
-            if path[-1] == '/':
-                path_list = re.split(r'''/(?=(?:[^\[\]]|\[[^\[\]]+\])*$)''', path)[:-1]
-            else:
-                path_list = re.split(r'''/(?=(?:[^\[\]]|\[[^\[\]]+\])*$)''', path)
-        for elem in path_list:
-            elem_name = elem.split("[", 1)[0]
-            elem_keys = re.findall(r'\[(.*?)\]', elem)
-            dict_keys = dict(x.split('=', 1) for x in elem_keys)
-            path_elements.append(PathElem(name=elem_name, key=dict_keys))
-        return Path(elem=path_elements)
-
         
     def _get_version(self) -> GetResponse:
         if not self.gnmi_stub:
             self.gnmi_stub: gNMIStub = gNMIStub(self.channel)
-        get_message: GetRequest = GetRequest(path=[self._create_gnmi_path("Cisco-IOS-XR-spirit-install-instmgr-oper:software-install/version")],
+        get_message: GetRequest = GetRequest(path=[create_gnmi_path("Cisco-IOS-XR-spirit-install-instmgr-oper:software-install/version")],
                                              type=GetRequest.DataType.Value("STATE"), encoding=Encoding.Value("JSON_IETF"))
         response: GetResponse = self.gnmi_stub.Get(get_message, metadata=self.metadata)
         return response
@@ -70,7 +50,7 @@ class GNMIManager:
     def _get_hostname(self) -> GetResponse:
         if not self.gnmi_stub:
             self.gnmi_stub: gNMIStub = gNMIStub(self.channel)
-        get_message: GetRequest = GetRequest(path=[self._create_gnmi_path("Cisco-IOS-XR-shellutil-cfg:host-names")],
+        get_message: GetRequest = GetRequest(path=[create_gnmi_path("Cisco-IOS-XR-shellutil-cfg:host-names")],
                                              type=GetRequest.DataType.Value("CONFIG"), encoding=Encoding.Value("JSON_IETF"))
         response: GetResponse = self.gnmi_stub.Get(get_message, metadata=self.metadata)
         return response
@@ -82,7 +62,7 @@ class GNMIManager:
             else:
                 get_config_path = Path()
             self.gnmi_stub: gNMIStub = gNMIStub(self.channel) 
-            get_message: GetRequest = GetRequest(path=[get_config_path], type=GetRequest.DataType.Value("STATE"), encoding=Encoding.Value("JSON_IETF"))
+            get_message: GetRequest = GetRequest(path=[get_config_path], type=GetRequest.DataType.Value("CONFIG"), encoding=Encoding.Value("JSON_IETF"))
             response: GetResponse = self.gnmi_stub.Get(get_message, metadata=self.metadata)
             version: GetResponse = self._get_version()
             hostname: GetResponse = self._get_hostname()
@@ -95,8 +75,9 @@ class GNMIManager:
     def get(self, oper_model: str) -> Tuple[bool, Union[None, ParsedGetResponse]]:
         try:
             self.gnmi_stub: gNMIStub = gNMIStub(self.channel)
-            get_message: GetRequest = GetRequest(path=[self._create_gnmi_path(oper_model)], type=GetRequest.DataType.Value("OPERATIONAL"), encoding=Encoding.Value("JSON_IETF"))
+            get_message: GetRequest = GetRequest(path=[create_gnmi_path(oper_model)], type=GetRequest.DataType.Value("OPERATIONAL"), encoding=Encoding.Value("JSON_IETF"))
             response: GetResponse = self.gnmi_stub.Get(get_message, metadata=self.metadata)
+            print(response)
             version: GetResponse = self._get_version()
             hostname: GetResponse = self._get_hostname()
             return True, ParsedGetResponse(response, version, hostname, oper_model)
@@ -104,22 +85,31 @@ class GNMIManager:
             print(e)
             return False, None
 
-    def set(self, request: ParsedSetRequest) -> Tuple[bool, Union[None, ParsedSetResponse]]:
-        pass
-        
+    def set(self, request: SetRequest) -> Tuple[bool, Union[None, SetResponse]]:
+        try:
+            if not self.gnmi_stub:
+                self.gnmi_stub: gNMIStub = gNMIStub(self.channel)
+            response = self.gnmi_stub.Set(request, metadata=self.metadata)
+            return True, response
+        except Exception as e:
+            print(e)
+            return False, None
+
+    
 def main() -> None:
-    sc: GNMIManager = GNMIManager("10.8.70.51", "root", "lablab", "57400", "II11-5508-Mountain.pem")
+    sc: GNMIManager = GNMIManager("10.8.70.10", "root", "lablab", "57400", "II09-9904-Oberyn_10.8.70.10.pem")
     sc.connect()
     if sc.is_connected:
-        get_complete, response = sc.get("Cisco-IOS-XR-ip-ntp-oper:ntp")
+        get_complete, response = sc.get('openconfig-platform:components')
         if get_complete:
             print(response.full_response)
             #es = ElasticSearchUploader("2.2.2.1","9200")
-            #es.download("II11-5508-Mountain", "6.6.3", "Cisco-IOS-XR-clns-isis-cfg:isis")
             #es.upload(response)
-        #set_request: ParsedSetRequest = es.download(response.hostname, response.version)
-        #if not es.upload_full_config():
-        #print("Failed to put full config in ES")
+        #set_request: ParsedSetRequest = es.download("II11-5504-Daenerys", "6.6.3", "Cisco-IOS-XR-ip-ntp-cfg:ntp")
+        #set_complete, response = sc.set(set_request.update_request)
+        #if set_complete:
+        #    print(response)
+         
 
                 
 if __name__ == '__main__':
