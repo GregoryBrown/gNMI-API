@@ -95,22 +95,3 @@ class GNMIManager:
             return False, None
 
     
-def main() -> None:
-    sc: GNMIManager = GNMIManager("10.8.70.10", "root", "lablab", "57400", "II09-9904-Oberyn_10.8.70.10.pem")
-    sc.connect()
-    if sc.is_connected:
-        #get_complete, response = sc.get_config('Cisco-IOS-XR-cdp-cfg:cdp')
-        #get_complete, response = sc.get_config()
-        #if get_complete:
-        es = ElasticSearchUploader("2.2.2.1","9200")
-        #if es.upload_config(response):
-        set_request: ParsedSetRequest = es.download("II09-9904-Oberyn", "6.6.3", last=1)
-        set_complete, response = sc.set(set_request.update_request)
-        print(set_complete)
-        print(response)
-
-         
-
-                
-if __name__ == '__main__':
-    main()
