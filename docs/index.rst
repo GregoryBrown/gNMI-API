@@ -12,7 +12,8 @@ This is a simple API for connecting to a gNMI device and uploading responses to 
    :caption: Contents:
 
    responses
-
+   uploader
+   
 Indices and tables
 ==================
 

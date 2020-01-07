@@ -1,9 +1,9 @@
 """
 .. module:: responses
    :platform: Unix, Windows
-   :synopsis: Contains the Get and Set responses from the gNMI device
+   :synopsis: Contains the Get Response and Set Request from the gNMI device
 
-.. moduleauthor:: Greg Brown <gregorbr@cisco.com>
+.. moduleauthor:: Greg Brown <gsb5067@gmail.com>
 
 """
 from protos.gnmi_pb2 import GetResponse, SetRequest, Update, Path, TypedValue
@@ -14,12 +14,13 @@ import json
 
 class ParsedSetRequest:
     """ParsedSetRequest creates the Set requests for all options (replace, update, delete)
+
     :param configs: The configuration dictionary that you want to parse into Set Requests
     :type configs: SetRequest
 
     """
-    def __init__(self, features: Dict[str, Any]):
-        self._features = features
+    def __init__(self, configs: Dict[str, Any]):
+        self._features = configs
         self.delete_request = SetRequest(delete=self._create_delete_paths())
         self.update_request = SetRequest(update=self._create_updates())
         self.replace_request = SetRequest(replace=self._create_updates())

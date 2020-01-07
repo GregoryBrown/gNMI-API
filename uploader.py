@@ -6,6 +6,14 @@ from utils import feature_name_to_index, get_date
 
 
 class ElasticSearchUploader:
+    """ElasticSearchUploader creates an object that can upload GetResponses, and download SetRequests from an ElasticSearch instance
+
+    :param elastic_server: The IP of the ElasticSearch instance
+    :type elastic_server: str
+    :param elastic_port: The port number of the ElasticSearch instance
+    :type elastic_port: str
+
+    """
     def __init__(self, elastic_server: str, elastic_port: str) -> None:
         self.url: str = f"http://{elastic_server}:{elastic_port}"
         
