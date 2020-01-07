@@ -58,7 +58,7 @@ class GNMIManager:
     def get_config(self, config_model: str = None) -> Tuple[bool, Union[None, ParsedGetResponse]]:
         try:
             if config_model:
-                get_config_path = self._create_gnmi_path(config_model)
+                get_config_path = create_gnmi_path(config_model)
             else:
                 get_config_path = Path()
             self.gnmi_stub: gNMIStub = gNMIStub(self.channel) 
@@ -77,7 +77,6 @@ class GNMIManager:
             self.gnmi_stub: gNMIStub = gNMIStub(self.channel)
             get_message: GetRequest = GetRequest(path=[create_gnmi_path(oper_model)], type=GetRequest.DataType.Value("OPERATIONAL"), encoding=Encoding.Value("JSON_IETF"))
             response: GetResponse = self.gnmi_stub.Get(get_message, metadata=self.metadata)
-            print(response)
             version: GetResponse = self._get_version()
             hostname: GetResponse = self._get_hostname()
             return True, ParsedGetResponse(response, version, hostname, oper_model)
@@ -100,15 +99,16 @@ def main() -> None:
     sc: GNMIManager = GNMIManager("10.8.70.10", "root", "lablab", "57400", "II09-9904-Oberyn_10.8.70.10.pem")
     sc.connect()
     if sc.is_connected:
-        get_complete, response = sc.get('openconfig-platform:components')
-        if get_complete:
-            print(response.full_response)
-            #es = ElasticSearchUploader("2.2.2.1","9200")
-            #es.upload(response)
-        #set_request: ParsedSetRequest = es.download("II11-5504-Daenerys", "6.6.3", "Cisco-IOS-XR-ip-ntp-cfg:ntp")
-        #set_complete, response = sc.set(set_request.update_request)
-        #if set_complete:
-        #    print(response)
+        #get_complete, response = sc.get_config('Cisco-IOS-XR-cdp-cfg:cdp')
+        #get_complete, response = sc.get_config()
+        #if get_complete:
+        es = ElasticSearchUploader("2.2.2.1","9200")
+        #if es.upload_config(response):
+        set_request: ParsedSetRequest = es.download("II09-9904-Oberyn", "6.6.3", last=1)
+        set_complete, response = sc.set(set_request.update_request)
+        print(set_complete)
+        print(response)
+
          
 
                 

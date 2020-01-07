@@ -35,7 +35,7 @@ class ElasticSearchUploader:
         data_to_post["@timestamp"] = timestamp/1000000
         data_to_post["host"] = hostname
         data_to_post["version"] = version
-        data_to_post["config"] = [data]
+        data_to_post["content"] = [data]
         post_response = request("POST", f"{self.url}/{index}/_doc", json=data_to_post, headers=headers)
         if not post_response.status_code in [200, 201]:
             raise PostDataError(post_response.status_code, post_response.json(),
@@ -51,7 +51,8 @@ class ElasticSearchUploader:
         keys: List[str] = []
         for feature in features:
             for key, value in feature.items():
-                keys.append(key)
+                if not key == "index":
+                    keys.append(key)
         features_to_post["features"] = keys
         post_response = request("POST", f"{self.url}/{index}/_doc", json=features_to_post, headers=headers)
         if not post_response.status_code in [200, 201]:
@@ -60,6 +61,27 @@ class ElasticSearchUploader:
 
         
 
+
+    def upload_config(self, config_data: ParsedGetResponse) -> bool:
+        try:
+            index_list: List[str] = self.populate_index_list()
+            feature_index = f"router-features"
+            if feature_index not in index_list:
+                self.put_index(feature_index) 
+            self.post_features(config_data.sub_responses, feature_index, int(config_data.timestamp), config_data.version, config_data.hostname)
+            if self.upload(config_data):
+                return True
+            else:
+                return False
+        except (PostDataError, PutIndexError, GetIndexListError) as e:
+            print(e.code)
+            print(e.response)
+            print(e.message)
+            return False
+        except Exception as e:
+            print(e)
+            return False
+        
     def upload(self, get_data: ParsedGetResponse) -> bool:
         try:
             index_list: List[str] = self.populate_index_list()
@@ -69,10 +91,6 @@ class ElasticSearchUploader:
                     print(f'Putting {index} in Elasticsearch')
                     self.put_index(index)
                 self.post_data(sub_response, index, int(get_data.timestamp), get_data.version, get_data.hostname)
-            #feature_index = f"router-features"
-            #if feature_index not in index_list:
-            #    self.put_index(feature_index)
-            #self.post_features(get_data.configlets, feature_index, int(get_data.timestamp), get_data.version, get_data.hostname)
             return True
         except (PostDataError, PutIndexError, GetIndexListError) as e:
             print(e.code)
@@ -84,10 +102,10 @@ class ElasticSearchUploader:
             return False
 
         
-    def download(self, hostname: str, version: str, configlet: str = None) -> ParsedSetRequest:
+    def download(self, hostname: str, version: str, configlet: str = None, last: int = 1) -> ParsedSetRequest:
         search_request: Dict[str, Any]  = {"query": {"bool": {"must": [{"match_all": {}}],"filter":
                                                               [{"match_phrase": {"version": {"query": f"{version}"}}},
-                                                               {"match_phrase": {"host": {"query": f"{hostname}"}}}]}},"size" : 1,"sort": [{"@timestamp": {"order": "desc"}}]}
+                                                               {"match_phrase": {"host": {"query": f"{hostname}"}}}]}},"size" : last,"sort": [{"@timestamp": {"order": "desc"}}]}
 
         headers: Dict[str,str] = {'Content-Type': "application/json"}
         if configlet:
@@ -95,10 +113,10 @@ class ElasticSearchUploader:
         else:
             post_response = request("POST", f"{self.url}/router-features/_search", json=search_request, headers=headers)
             rc = post_response.json()
-            feature_list: List = rc["hits"]["hits"][0]['_source']["features"]
+            feature_list: List = rc["hits"]["hits"][-1]['_source']["features"]
         feature_dict = {}
         for feature in feature_list:
             post_response = request("POST", f"{self.url}/{feature_name_to_index(feature)}*/_search", json=search_request, headers=headers)
             rc = post_response.json()
-            feature_dict.update(rc["hits"]["hits"][0]['_source']["config"][0])
+            feature_dict.update(rc["hits"]["hits"][-1]['_source']["content"][0])
         return ParsedSetRequest(feature_dict)

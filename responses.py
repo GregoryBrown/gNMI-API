@@ -60,10 +60,11 @@ class ParsedGetResponse:
         self.full_response: Dict[str, Any] = self._parse_full_response(response)
         self.version: str = self._parse_full_response(version)['package'][0]['version']
         if config_model:
+            rc = {config_model: self.full_response}
             index = feature_name_to_index(config_model)
             index = f"{index}-gnmi-{get_date()}"
-            self.full_response["index"] = index 
-            self.sub_responses: List[Dict[str, Any]] = [self.full_response]
+            rc["index"] = index
+            self.sub_responses: List[Dict[str, Any]] = [rc]
         else:
             self.sub_responses: List[Dict[str, Any]] = self._parse_sub_responses(self.full_response)
 
