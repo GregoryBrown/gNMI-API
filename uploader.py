@@ -1,3 +1,12 @@
+"""
+.. module:: uploader
+   :platform: Unix, Windows
+   :synopsis: Used to upload and download data from an Elasticsearch cluster
+
+.. moduleauthor:: Greg Brown <gsb5067@gmail.com>
+
+
+"""
 from responses import ParsedGetResponse, ParsedSetRequest
 from errors import GetIndexListError, PostDataError, PutIndexError
 from typing import List, Set, Dict, Tuple, Union, Any
@@ -16,8 +25,17 @@ class ElasticSearchUploader:
     """
     def __init__(self, elastic_server: str, elastic_port: str) -> None:
         self.url: str = f"http://{elastic_server}:{elastic_port}"
+
         
-    def put_index(self, index: str) -> None:
+    def _put_index(self, index: str) -> None:
+        """Put an index into the ElasticSeearch instance
+
+        :param index: The index name to put into the ES instance, formatted for ES 7.0+
+        :type index: str
+        :returns:  None
+        :raises: PutIndexError
+
+        """
         headers = {'Content-Type': "application/json"}
         mapping = {"mappings": {"properties": {"@timestamp": {"type": "date_nanos"}}}}
         index_put_response = request("PUT", f"{self.url}/{index}", headers=headers, json=mapping)
@@ -25,7 +43,13 @@ class ElasticSearchUploader:
             raise PutIndexError(index_put_response.status_code, index_put_response.json(),
                           index, f"Error putting {index} in ES")
         
-    def populate_index_list(self) -> List[str]:
+    def _populate_index_list(self) -> List[str]:
+        """Query the Elasticsearch for all of the indices
+
+        :returns: List of strings
+        :raises: GetIndexListError
+
+        """
         index_list: List[str] = []
         get_response = request("GET", f"{self.url}/*")
         if not get_response.status_code == 200:
@@ -37,68 +61,38 @@ class ElasticSearchUploader:
         return index_list
             
 
-    def post_data(self, data: Dict[str, Any], index: str, timestamp: int, version: str, hostname: str) -> None:
+    def _post_parsed_get_response(self, data: ParsedGetResponse, index: str) -> None:
+        """ Post data to an ES instance with a given index
+
+        :param data: The data you want to post
+        :type data: GetParsedResponse
+        :param index: The index to post the data to
+        :type index: str
+        :raises: PostDataError
+
+        """
         headers = {'Content-Type': "application/json"}
-        data_to_post: Dict[str, Any] = {}
-        data_to_post["@timestamp"] = timestamp/1000000
-        data_to_post["host"] = hostname
-        data_to_post["version"] = version
-        data_to_post["content"] = [data]
-        post_response = request("POST", f"{self.url}/{index}/_doc", json=data_to_post, headers=headers)
+        post_response = request("POST", f"{self.url}/{index}/_doc", json=data.to_dict(), headers=headers)
         if not post_response.status_code in [200, 201]:
             raise PostDataError(post_response.status_code, post_response.json(),
                                 "Error while posting data")
 
-
-    def post_features(self, features: List[Dict[str, Any]], index: str, timestamp: int, version: str, hostname: str) -> None:
-        headers = {'Content-Type': "application/json"}
-        features_to_post: Dict[str, Any] = {}
-        features_to_post["@timestamp"] = timestamp/1000000
-        features_to_post["host"] = hostname
-        features_to_post["version"] = version
-        keys: List[str] = []
-        for feature in features:
-            for key, value in feature.items():
-                if not key == "index":
-                    keys.append(key)
-        features_to_post["features"] = keys
-        post_response = request("POST", f"{self.url}/{index}/_doc", json=features_to_post, headers=headers)
-        if not post_response.status_code in [200, 201]:
-            raise PostDataError(post_response.status_code, post_response.json(),
-                                "Error while posting features")
-
         
+    def upload(self, data: List[ParsedGetResponse]) -> bool:
+        """Upload operation data into Elasticsearch
 
+        :param get_data: The operational data to upload
+        :type get_data: ParsedGetResponse
+        :returns: True if upload was successfull
 
-    def upload_config(self, config_data: ParsedGetResponse) -> bool:
+        """
         try:
-            index_list: List[str] = self.populate_index_list()
-            feature_index = f"router-features"
-            if feature_index not in index_list:
-                self.put_index(feature_index) 
-            self.post_features(config_data.sub_responses, feature_index, int(config_data.timestamp), config_data.version, config_data.hostname)
-            if self.upload(config_data):
-                return True
-            else:
-                return False
-        except (PostDataError, PutIndexError, GetIndexListError) as e:
-            print(e.code)
-            print(e.response)
-            print(e.message)
-            return False
-        except Exception as e:
-            print(e)
-            return False
-        
-    def upload(self, get_data: ParsedGetResponse) -> bool:
-        try:
-            index_list: List[str] = self.populate_index_list()
-            for sub_response in get_data.sub_responses:
-                index: str = sub_response.pop("index")
-                if index not in index_list:
-                    print(f'Putting {index} in Elasticsearch')
-                    self.put_index(index)
-                self.post_data(sub_response, index, int(get_data.timestamp), get_data.version, get_data.hostname)
+            index_list: List[str] = self._populate_index_list()
+            for parsed_get_response in data:
+                if parsed_get_response.index not in index_list:
+                    print(f'Putting {parsed_get_response.index} in Elasticsearch')
+                    self._put_index(parsed_get_response.index)
+                self._post_parsed_get_response(parsed_get_response, parsed_get_response.index)
             return True
         except (PostDataError, PutIndexError, GetIndexListError) as e:
             print(e.code)
@@ -111,6 +105,19 @@ class ElasticSearchUploader:
 
         
     def download(self, hostname: str, version: str, configlet: str = None, last: int = 1) -> ParsedSetRequest:
+        """Download a configuration from Elasticsearch
+
+        :param hostname: The hostname to query 
+        :type hostname: str
+        :param version: The version of configuration to query
+        :type version: str
+        :param configlet: The yang model to query, defaults to None so query the full hostname and vesrion configuration
+        :type configlet: str
+        :param last: Can be used to query the nth configuration, defaults to 1
+        :type last: int
+        :returns: ParsedSetRequest
+
+        """
         search_request: Dict[str, Any]  = {"query": {"bool": {"must": [{"match_all": {}}],"filter":
                                                               [{"match_phrase": {"version": {"query": f"{version}"}}},
                                                                {"match_phrase": {"host": {"query": f"{hostname}"}}}]}},"size" : last,"sort": [{"@timestamp": {"order": "desc"}}]}
@@ -119,12 +126,12 @@ class ElasticSearchUploader:
         if configlet:
             feature_list = [configlet]
         else:
-            post_response = request("POST", f"{self.url}/router-features/_search", json=search_request, headers=headers)
+            post_response = request("POST", f"{self.url}/router-configs-gnmi*/_search", json=search_request, headers=headers)
             rc = post_response.json()
-            feature_list: List = rc["hits"]["hits"][-1]['_source']["features"]
+            feature_list: List = rc["hits"]["hits"][-1]['_source']["content"]["configs"]
         feature_dict = {}
         for feature in feature_list:
             post_response = request("POST", f"{self.url}/{feature_name_to_index(feature)}*/_search", json=search_request, headers=headers)
             rc = post_response.json()
-            feature_dict.update(rc["hits"]["hits"][-1]['_source']["content"][0])
+            feature_dict[feature] = rc["hits"]["hits"][-1]['_source']["content"]
         return ParsedSetRequest(feature_dict)

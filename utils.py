@@ -22,7 +22,6 @@ def create_gnmi_path(path: str) -> Path:
         path_elements.append(PathElem(name=elem_name, key=dict_keys))
     return Path(elem=path_elements)
 
-
 def get_date() -> str:
     now: datetime = datetime.now()
     month: str = f"{now.month:02d}"
@@ -30,5 +29,6 @@ def get_date() -> str:
     return '.'.join([str(now.year), month, day])
 
 def feature_name_to_index(name):
-    return name.replace('/', '-').lower().replace(':', '-')
+    index = name.replace('/', '-').lower().replace(':', '-').replace('[','-').replace(']','').replace('"','')
+    return f"{index}-gnmi-{get_date()}"
 

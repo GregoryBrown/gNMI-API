@@ -54,30 +54,46 @@ class ParsedGetResponse:
     :returns:  None
 
     """
-    def __init__(self, response: GetResponse, version: GetResponse, hostname: GetResponse, config_model: str = None) -> None:
-        self._response: GetResponse = response
-        self.timestamp = [n.timestamp for n in response.notification][0]
-        self.hostname: str = self._parse_full_response(hostname)['host-name']
-        self.full_response: Dict[str, Any] = self._parse_full_response(response)
-        self.version: str = self._parse_full_response(version)['package'][0]['version']
-        if config_model:
-            rc = {config_model: self.full_response}
-            index = feature_name_to_index(config_model)
-            index = f"{index}-gnmi-{get_date()}"
-            rc["index"] = index
-            self.sub_responses: List[Dict[str, Any]] = [rc]
-        else:
-            self.sub_responses: List[Dict[str, Any]] = self._parse_sub_responses(self.full_response)
+    def __init__(self, response: GetResponse, version: GetResponse, hostname: GetResponse) -> None:
+        self.byte_size: int = response.ByteSize()
+        self._raw_response: GetResponse = response
+        self.timestamp: int = int([n.timestamp for n in response.notification][0])/1000000
+        self.hostname: str = self._parse_json_response(hostname)['host-name']
+        self.version: str = self._parse_version(version)
+        self.encode_path: str = self._parse_path(response)
+        self.index: str = feature_name_to_index(self.encode_path)
+        self.json_response: Dict[str, Any] = self._parse_json_response(response)
 
-    def _parse_sub_responses(self, full_response: Dict[str, Any]) -> List[Dict[str, Any]]:
-        sub_responses = []
-        for key, value in full_response.items():
-            index = feature_name_to_index(key)
-            index = f"{index}-gnmi-{get_date()}"
-            sub_responses.append({key: value, "index": index})
-        return sub_responses[:-1]
+    def __str__(self):
+        return f"timestamp: {self.timestamp}\nhostname: {self.hostname}\nversion: {self.version}\njson: {self.json_response}\nbyte-size: {self.byte_size}\nencode_path: {self.encode_path}\nindex: {self.index}"
 
-    def _parse_full_response(self, response: GetResponse) -> Dict[str, Any]:
+    def to_dict(self) -> Dict[str, Any]:
+        data_to_post: Dict[str, Any] = {}
+        data_to_post["@timestamp"] = self.timestamp
+        data_to_post["host"] = self.hostname
+        data_to_post["version"] = self.version
+        data_to_post["byte-size"] = self.byte_size
+        data_to_post["encode_path"] = self.encode_path
+        data_to_post["content"] = self.json_response
+        return data_to_post
+    
+    def _parse_path(self, response: GetResponse):
+        path = response.notification[0].update[0].path
+        encode_path = []
+        for elem in path.elem:
+            encode_path.append(elem.name)
+        return '/'.join(encode_path)
+
+    
+    def _parse_version(self, version: GetResponse):
+        for notification in version.notification:
+            for update in notification.update:
+                rc = update.val.json_ietf_val
+                rc = rc.decode().strip('}').strip('"')
+        return rc
+
+
+    def _parse_json_response(self, response: GetResponse) -> Dict[str, Any]:
         for notification in response.notification:
             for update in notification.update:
                 rc = update.val.json_ietf_val
@@ -85,3 +101,4 @@ class ParsedGetResponse:
                     return dict()
                 else:
                     return json.loads(rc)
+
