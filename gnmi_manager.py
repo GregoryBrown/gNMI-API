@@ -25,7 +25,7 @@ class gNMIManager:
     :param pem: The location of the pem file used to authenticate
     :type pem: str
     :param options: Options to be passed to the gRPC channel
-    :type options: list of tuples
+    :type options: List[Tuple[str,str]]
     
     """
     def __init__(self, host: str, username: str, password: str, port: str, pem: str, options: List[Tuple[str, str]] = [('grpc.ssl_target_name_override', 'ems.cisco.com')]) -> None:
@@ -43,11 +43,9 @@ class gNMIManager:
         with open(self.pem, "rb") as fp:
             return fp.read()
 
-    def connect(self) -> bool:
-        """Connect to the gNMI device
-
-        :returns: bool
-
+    def connect(self) -> None:
+        """Connet to the gNMI device
+        
         """
         try:
             credentials: grpc.ssl_channel_credentials = grpc.ssl_channel_credentials(self._read_pem())
@@ -56,30 +54,31 @@ class gNMIManager:
             self._connected = True
         except grpc.FutureTimeoutError as e:
             print(f"Unable to connect to {self.host}:{self.port}")
+
             
     def is_connected(self) -> bool:
-        """Returns True if connected to gNMI device
+        """Checks if connected to gNMI device
 
-        :returns: bool
+        :returns: Returns True if connected to gNMI device
 
         """
         return self._connected
 
 
-    def get_stub(self) -> gNMIStub:
+    def _get_stub(self) -> gNMIStub:
         if not self.gnmi_stub:
             self.gnmi_stub: gNMIStub = gNMIStub(self.channel)
         return self.gnmi_stub
     
     def _get_version(self) -> GetResponse:
-        stub = self.get_stub()
+        stub = self._get_stub()
         get_message: GetRequest = GetRequest(path=[create_gnmi_path("openconfig-platform:components/component/state/software-version")],
                                              type=GetRequest.DataType.Value("STATE"), encoding=Encoding.Value("JSON_IETF"))
         response: GetResponse = stub.Get(get_message, metadata=self.metadata)
         return response
 
     def _get_hostname(self) -> GetResponse:
-        stub = self.get_stub()
+        stub = self._get_stub()
         get_message: GetRequest = GetRequest(path=[create_gnmi_path("Cisco-IOS-XR-shellutil-cfg:host-names")],
                                              type=GetRequest.DataType.Value("CONFIG"), encoding=Encoding.Value("JSON_IETF"))
         response: GetResponse = stub.Get(get_message, metadata=self.metadata)
@@ -109,7 +108,7 @@ class gNMIManager:
             
                                          
     
-    def get_config(self, config_models: str = None) -> Tuple[bool, Union[None, List[ParsedGetResponse]]]:
+    def get_config(self, config_models: List[str] = None) -> Tuple[bool, Union[None, List[ParsedGetResponse]]]:
         """Get configuration of the gNMI device 
         
         :param config_model: Yang model of a specific configuration to get, defaults to None, to get the full configuration
@@ -120,7 +119,7 @@ class gNMIManager:
         try:
             version: GetResponse = self._get_version()
             hostname: GetResponse = self._get_hostname()
-            stub = self.get_stub()
+            stub = self._get_stub()
             responses = []
             if config_models:
                 for config_model in config_models:
@@ -149,7 +148,7 @@ class gNMIManager:
         """
         try:
             responses = []
-            stub = self.get_stub()
+            stub = self._get_stub()
             version: GetResponse = self._get_version()
             hostname: GetResponse = self._get_hostname()
             for oper_model in oper_models:
@@ -169,7 +168,7 @@ class gNMIManager:
 
         """
         try:
-            stub = self.get_stub()
+            stub = self._get_stub()
             response = stub.Set(request, metadata=self.metadata)
             return True, response
         except Exception as e:

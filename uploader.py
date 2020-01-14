@@ -32,7 +32,6 @@ class ElasticSearchUploader:
 
         :param index: The index name to put into the ES instance, formatted for ES 7.0+
         :type index: str
-        :returns:  None
         :raises: PutIndexError
 
         """
@@ -46,7 +45,7 @@ class ElasticSearchUploader:
     def _populate_index_list(self) -> List[str]:
         """Query the Elasticsearch for all of the indices
 
-        :returns: List of strings
+        :returns: List of the indices in the Elastic Search instance
         :raises: GetIndexListError
 
         """
@@ -65,7 +64,7 @@ class ElasticSearchUploader:
         """ Post data to an ES instance with a given index
 
         :param data: The data you want to post
-        :type data: GetParsedResponse
+        :type data: ParsedGetResponse
         :param index: The index to post the data to
         :type index: str
         :raises: PostDataError
@@ -81,9 +80,9 @@ class ElasticSearchUploader:
     def upload(self, data: List[ParsedGetResponse]) -> bool:
         """Upload operation data into Elasticsearch
 
-        :param get_data: The operational data to upload
-        :type get_data: ParsedGetResponse
-        :returns: True if upload was successfull
+        :param data: The data to upload to Elastic Search
+        :type data: List[ParsedGetResponse]
+        :returns: True if upload was successful, else False
 
         """
         try:
@@ -115,7 +114,7 @@ class ElasticSearchUploader:
         :type configlet: str
         :param last: Can be used to query the nth configuration, defaults to 1
         :type last: int
-        :returns: ParsedSetRequest
+        :returns: A set request that can be used to issue a Set on the gNMI device
 
         """
         search_request: Dict[str, Any]  = {"query": {"bool": {"must": [{"match_all": {}}],"filter":
