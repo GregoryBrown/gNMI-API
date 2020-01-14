@@ -63,7 +63,8 @@ class ParsedGetResponse:
         self.encode_path: str = self._parse_path(response)
         self.index: str = feature_name_to_index(self.encode_path)
         self.json_response: Dict[str, Any] = self._parse_json_response(response)
-
+        self.json: Dict[str, Any] = {self.encode_path: self.json_response}
+        
     def __str__(self):
         return f"timestamp: {self.timestamp}\nhostname: {self.hostname}\nversion: {self.version}\njson: {self.json_response}\nbyte-size: {self.byte_size}\nencode_path: {self.encode_path}\nindex: {self.index}"
 
