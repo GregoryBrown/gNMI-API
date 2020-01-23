@@ -36,7 +36,7 @@ class ElasticSearchUploader:
 
         """
         headers = {'Content-Type': "application/json"}
-        mapping = {"mappings": {"properties": {"@timestamp": {"type": "date_nanos"}}}}
+        mapping = {"mappings": {"properties": {"@timestamp": {"type": "date"}}}}
         index_put_response = request("PUT", f"{self.url}/{index}", headers=headers, json=mapping)
         if not index_put_response.status_code == 200:
             raise PutIndexError(index_put_response.status_code, index_put_response.json(),

@@ -176,15 +176,3 @@ class gNMIManager:
             return False, None
 
     
-def main():
-    gm = gNMIManager("10.8.70.51", "root", "lablab", "57400", "II11-5508-Mountain_10.8.70.51.pem")
-    gm.connect()
-    if gm.is_connected():
-        #complete, responses = gm.get(['openconfig-platform:components'])
-        #complete, responses = gm.get_config()
-        es = ElasticSearchUploader("2.2.2.1", "9200")
-        print(es.download("II11-5508-Mountain", "6.6.3", "openconfig-lldp:lldp").update_request)
-        
-
-if __name__ == '__main__':
-    main()
