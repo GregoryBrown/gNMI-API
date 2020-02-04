@@ -2,7 +2,23 @@ import grpc
 import re
 import json
 from protos.gnmi_pb2_grpc import gNMIStub
-from protos.gnmi_pb2 import GetRequest, GetResponse, Path, PathElem, CapabilityRequest, Encoding, SetRequest, Update, TypedValue, SetResponse, Notification
+from protos.gnmi_pb2 import (
+    GetRequest,
+    GetResponse,
+    Path,
+    PathElem,
+    CapabilityRequest,
+    Encoding,
+    SetRequest,
+    Update,
+    TypedValue,
+    SetResponse,
+    Notification,
+    Subscription,
+    SubscriptionMode,
+    SubscriptionList,
+    SubscribeRequest,
+)
 from typing import List, Set, Dict, Tuple, Union, Any
 from datetime import datetime
 from uploader import ElasticSearchUploader
@@ -10,11 +26,17 @@ from responses import ParsedGetResponse, ParsedSetRequest
 from utils import create_gnmi_path
 import json
 
-        
+
+class GNMIException(Exception):
+    """ Exception for GNMI API Errors """
+
+    pass
+
+
 class gNMIManager:
     """Opens a gRPC connection to the device and allows to issue gNMI reqeusts
 
-    :param host: The IP address of the gNMI device 
+    :param host: The IP address of the gNMI device
     :type host: str
     :param username: The useranme used to authenticate
     :type username: str
@@ -26,18 +48,35 @@ class gNMIManager:
     :type pem: str
     :param options: Options to be passed to the gRPC channel
     :type options: List[Tuple[str,str]]
-    
+
     """
-    def __init__(self, host: str, username: str, password: str, port: str, pem: str, options: List[Tuple[str, str]] = [('grpc.ssl_target_name_override', 'ems.cisco.com')]) -> None:
+
+    def __init__(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        port: str,
+        options: List[Tuple[str, str]] = [("grpc.ssl_target_name_override", "ems.cisco.com")],
+    ) -> None:
         self.host: str = host
         self.username: str = username
         self.password: str = password
         self.port: str = port
-        self.pem: str = pem
         self.options: List[Tuple[str, str]] = options
-        self.metadata: List[Tuple[str, str]] = [('username', self.username), ('password', self.password)]
+        self.metadata: List[Tuple[str, str]] = [
+            ("username", self.username),
+            ("password", self.password),
+        ]
         self._connected: bool = False
-        self.gnmi_stub:  gNMIStub = None
+        self.gnmi_stub: gNMIStub = None
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
 
     def _read_pem(self) -> bytes:
         with open(self.pem, "rb") as fp:
@@ -45,17 +84,15 @@ class gNMIManager:
 
     def connect(self) -> None:
         """Connet to the gNMI device
-        
+
         """
         try:
-            credentials: grpc.ssl_channel_credentials = grpc.ssl_channel_credentials(self._read_pem())
-            self.channel: grpc.secure_channel = grpc.secure_channel(':'.join([self.host, self.port]), credentials, self.options)
+            self.channel = grpc.insecure_channel(":".join([self.host, self.port]))
             grpc.channel_ready_future(self.channel).result(timeout=10)
             self._connected = True
         except grpc.FutureTimeoutError as e:
             print(f"Unable to connect to {self.host}:{self.port}")
 
-            
     def is_connected(self) -> bool:
         """Checks if connected to gNMI device
 
@@ -64,7 +101,6 @@ class gNMIManager:
         """
         return self._connected
 
-
     def _get_stub(self) -> gNMIStub:
         if not self.gnmi_stub:
             self.gnmi_stub: gNMIStub = gNMIStub(self.channel)
@@ -72,18 +108,27 @@ class gNMIManager:
     
     def _get_version(self) -> GetResponse:
         stub = self._get_stub()
-        get_message: GetRequest = GetRequest(path=[create_gnmi_path("openconfig-platform:components/component/state/software-version")],
-                                             type=GetRequest.DataType.Value("STATE"), encoding=Encoding.Value("JSON_IETF"))
+        get_message: GetRequest = GetRequest(
+            path=[
+                create_gnmi_path(
+                    "openconfig-platform:components/component/state/software-version"
+                )
+            ],
+            type=GetRequest.DataType.Value("STATE"),
+            encoding=Encoding.Value("JSON_IETF"),
+        )
         response: GetResponse = stub.Get(get_message, metadata=self.metadata)
         return response
 
     def _get_hostname(self) -> GetResponse:
         stub = self._get_stub()
-        get_message: GetRequest = GetRequest(path=[create_gnmi_path("Cisco-IOS-XR-shellutil-cfg:host-names")],
-                                             type=GetRequest.DataType.Value("CONFIG"), encoding=Encoding.Value("JSON_IETF"))
+        get_message: GetRequest = GetRequest(
+            path=[create_gnmi_path("Cisco-IOS-XR-shellutil-cfg:host-names")],
+            type=GetRequest.DataType.Value("CONFIG"),
+            encoding=Encoding.Value("JSON_IETF"),
+        )
         response: GetResponse = stub.Get(get_message, metadata=self.metadata)
         return response
-
 
     def _split_full_config(self, response: GetResponse) -> List[GetResponse]:
         responses = []
@@ -96,21 +141,21 @@ class gNMIManager:
             str_config = json.dumps(config)
             type_config_val = TypedValue(json_ietf_val=str_config.encode())
             up = Update(path=create_gnmi_path(model), val=type_config_val)
-            notification = Notification(update = [up], timestamp = timestamp)
+            notification = Notification(update=[up], timestamp=timestamp)
             responses.append(GetResponse(notification=[notification]))
             models.append(model)
         model_str_config = json.dumps({"configs": models})
         model_type_config_val = TypedValue(json_ietf_val=model_str_config.encode())
         up = Update(path=create_gnmi_path("router-configs"), val=model_type_config_val)
-        notification = Notification(update = [up], timestamp = timestamp)
+        notification = Notification(update=[up], timestamp=timestamp)
         responses.append(GetResponse(notification=[notification]))
         return responses
-            
-                                         
-    
-    def get_config(self, config_models: List[str] = None) -> Tuple[bool, Union[None, List[ParsedGetResponse]]]:
-        """Get configuration of the gNMI device 
-        
+
+    def get_config(
+        self, encoding: str, config_models: List[str] = None
+    ) -> Tuple[bool, Union[None, List[ParsedGetResponse]]]:
+        """Get configuration of the gNMI device
+
         :param config_model: Yang model of a specific configuration to get, defaults to None, to get the full configuration
         :type config_model: str
         :returns: Tuple of bool and ParsedGetResponse
@@ -123,22 +168,33 @@ class gNMIManager:
             responses = []
             if config_models:
                 for config_model in config_models:
-                    get_message: GetRequest = GetRequest(path=[create_gnmi_path(config_model)], type=GetRequest.DataType.Value("CONFIG"), encoding=Encoding.Value("JSON_IETF"))
+                    get_message: GetRequest = GetRequest(
+                        path=[create_gnmi_path(config_model)],
+                        type=GetRequest.DataType.Value("CONFIG"),
+                        encoding=Encoding.Value(encoding),
+                    )
                     response: GetResponse = stub.Get(get_message, metadata=self.metadata)
                     responses.append(ParsedGetResponse(response, version, hostname))
             else:
-                get_message: GetRequest = GetRequest(path=[Path()], type=GetRequest.DataType.Value("CONFIG"), encoding=Encoding.Value("JSON_IETF"))
-                full_config_response: GetResponse = stub.Get(get_message, metadata=self.metadata)
+                get_message: GetRequest = GetRequest(
+                    path=[Path()],
+                    type=GetRequest.DataType.Value("CONFIG"),
+                    encoding=Encoding.Value(encoding),
+                )
+                full_config_response: GetResponse = stub.Get(
+                    get_message, metadata=self.metadata
+                )
                 split_full_config_response = self._split_full_config(full_config_response)
                 for response in split_full_config_response:
-                    responses.append(ParsedGetResponse(response,version, hostname))
+                    responses.append(ParsedGetResponse(response, version, hostname))
             return True, responses
         except Exception as e:
             print(e)
             return False, None
 
-
-    def get(self, oper_models: List[str]) -> Tuple[bool, Union[None, List[ParsedGetResponse]]]:
+    def get(
+            self, encoding: str, oper_models: List[str]
+    ) -> Tuple[bool, Union[None, List[ParsedGetResponse]]]:
         """Get oper data of a gNMI device
 
         :param oper_model: The yang model of the operational data to get
@@ -152,7 +208,11 @@ class gNMIManager:
             version: GetResponse = self._get_version()
             hostname: GetResponse = self._get_hostname()
             for oper_model in oper_models:
-                get_message: GetRequest = GetRequest(path=[create_gnmi_path(oper_model)], type=GetRequest.DataType.Value("OPERATIONAL"), encoding=Encoding.Value("JSON_IETF"))
+                get_message: GetRequest = GetRequest(
+                    path=[create_gnmi_path(oper_model)],
+                    type=GetRequest.DataType.Value("OPERATIONAL"),
+                    encoding=Encoding.Value(encoding),
+                )
                 response: GetResponse = stub.Get(get_message, metadata=self.metadata)
                 responses.append(ParsedGetResponse(response, version, hostname))
             return True, responses
@@ -175,4 +235,81 @@ class gNMIManager:
             print(e)
             return False, None
 
-    
+    def process_header(self, header):
+        index = header.prefix.origin
+        keys = {}
+        encode_path = []
+        for elem in header.prefix.elem:
+            encode_path.append(elem.name)
+            if elem.key:
+                keys.update(elem.key)
+        return keys, f"{index}:{'/'.join(encode_path)}"
+
+    def get_value(self, type_value):
+        value_type = type_value.WhichOneof("value")
+        return getattr(type_value, value_type)
+
+    @staticmethod
+    def sub_to_path(request: SetRequest) -> SetRequest:
+        yield request
+
+    def subscribe(
+        self,
+            encoding: str,
+            requests: List[str],
+            sample_rate: int,
+            stream_mode: str,
+            subscribe_mode: str,
+    ) -> List[str]:
+        subs = []
+        sample_rate = sample_rate * 1000000000
+        for request in requests:
+            subs.append(
+                Subscription(
+                    path=create_gnmi_path(request),
+                    mode=SubscriptionMode.Value(subscribe_mode),
+                    sample_interval=sample_rate,
+                )
+            )
+        sub_list = SubscriptionList(
+            subscription=subs,
+            mode=SubscriptionList.Mode.Value(stream_mode),
+            encoding=Encoding.Value(encoding),
+        )
+        sub_request = SubscribeRequest(subscribe=sub_list)
+        try:
+            version: GetResponse = self._get_version()
+            hostname: GetResponse = self._get_hostname()
+            stub = self._get_stub()
+            for response in stub.Subscribe(
+                self.sub_to_path(sub_request), metadata=self.metadata
+            ):
+                if not response.sync_response:
+                    keys, path = self.process_header(response.update)
+                    for update in response.update.update:
+                        rc = []
+                        value = self.get_value(update.val)
+                        for elem in update.path.elem:
+                            rc.append(elem.name)
+                        yield f"{keys}\n{path}/{'/'.join(rc)}={value}"
+        except Exception as e:
+            print(e)
+
+
+class gNMIManagerTLS(gNMIManager):
+    def __init__(self, pem, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.pem: str = pem
+
+    def connect(self) -> None:
+        try:
+            credentials: grpc.ssl_channel_credentials = grpc.ssl_channel_credentials(
+                self._read_pem()
+            )
+            self.channel: grpc.secure_channel = grpc.secure_channel(
+                ":".join([self.host, self.port]), credentials, self.options
+            )
+            grpc.channel_ready_future(self.channel).result(timeout=10)
+            self._connected = True
+        except grpc.FutureTimeoutError as e:
+            print(f"Unable to connect to {self.host}:{self.port}")
