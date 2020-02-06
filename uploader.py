@@ -7,12 +7,15 @@
 
 
 """
-from responses import ParsedGetResponse, ParsedSetRequest
-from errors import GetIndexListError, PostDataError, PutIndexError
+from responses import ParsedResponse, ParsedSetRequest
 from typing import List, Set, Dict, Tuple, Union, Any
 from requests import request
-from utils import feature_name_to_index, get_date
+from utils import yang_path_to_es_index
 
+class ElasticSearchUploaderException(Exception):
+    """ Exception for ElasticSearchUploader Errors """
+
+    pass
 
 class ElasticSearchUploader:
     """ElasticSearchUploader creates an object that can upload GetResponses, and download SetRequests from an ElasticSearch instance
@@ -32,7 +35,7 @@ class ElasticSearchUploader:
 
         :param index: The index name to put into the ES instance, formatted for ES 7.0+
         :type index: str
-        :raises: PutIndexError
+        :raises: ElasticSearchUploaderException
 
         """
         headers = {"Content-Type": "application/json"}
@@ -40,75 +43,64 @@ class ElasticSearchUploader:
         index_put_response = request(
             "PUT", f"{self.url}/{index}", headers=headers, json=mapping
         )
+        
         if not index_put_response.status_code == 200:
-            raise PutIndexError(
-                index_put_response.status_code,
-                index_put_response.json(),
-                index,
-                f"Error putting {index} in ES",
-            )
+            print(index_put_response.json())
+            raise ElasticSearchUploaderException(f"Error putting {index} in ES")
+        
 
     def _populate_index_list(self) -> List[str]:
         """Query the Elasticsearch for all of the indices
 
         :returns: List of the indices in the Elastic Search instance
-        :raises: GetIndexListError
+        :raises: ElasticSearchUploaderException
 
         """
         index_list: List[str] = []
         get_response = request("GET", f"{self.url}/*")
         if not get_response.status_code == 200:
-            raise GetIndexListError(
-                get_response.status_code, get_response.json(), "Unable to get index list",
-            )
+            raise ElasticSearchUploaderException("Unable to get index list from ElasticSearch")
         for key in get_response.json():
             if not key.startswith("."):
                 index_list.append(key)
         return index_list
 
-    def _post_parsed_get_response(self, data: ParsedGetResponse, index: str) -> None:
+    def _post_parsed_response(self, data: ParsedResponse, index: str) -> None:
         """ Post data to an ES instance with a given index
 
         :param data: The data you want to post
         :type data: ParsedGetResponse
         :param index: The index to post the data to
         :type index: str
-        :raises: PostDataError
+        :raises: ElasticSearchUploaderException
 
         """
         headers = {"Content-Type": "application/json"}
+        post_data = dict({"host": data.hostname, "version": data.version}, **data.dict_to_upload)
+        print(post_data)
+        print("\n")
         post_response = request(
-            "POST", f"{self.url}/{index}/_doc", json=data.to_dict(), headers=headers,
+            "POST", f"{self.url}/{index}/_doc", json=post_data, headers=headers,
         )
         if not post_response.status_code in [200, 201]:
-            raise PostDataError(
-                post_response.status_code, post_response.json(), "Error while posting data",
-            )
+            pass
+            #raise ElasticSearchUploaderException("Error while posting data to ElasticSearch")
 
-    def upload(self, data: List[ParsedGetResponse]) -> bool:
+    def upload(self, data: List[ParsedResponse]):
         """Upload operation data into Elasticsearch
 
         :param data: The data to upload to Elastic Search
         :type data: List[ParsedGetResponse]
-        :returns: True if upload was successful, else False
 
         """
-        try:
-            index_list: List[str] = self._populate_index_list()
-            for parsed_get_response in data:
-                if parsed_get_response.index not in index_list:
-                    print(f"Putting {parsed_get_response.index} in Elasticsearch")
-                    self._put_index(parsed_get_response.index)
-                self._post_parsed_get_response(parsed_get_response, parsed_get_response.index)
-            return True
-        except (PostDataError, PutIndexError, GetIndexListError) as e:
-            print(e.code)
-            print(e.response)
-            print(e.message)
-            return False
-        except Exception as e:
-            print(e)
-            return False
+        index_list: List[str] = self._populate_index_list()
+        for parsed_response in data:
+            index = parsed_response.dict_to_upload.pop("index")
+            if index not in index_list:
+                print(f"Putting {index} in Elasticsearch")
+                self._put_index(index)
+                index_list.append(index)
+            self._post_parsed_response(parsed_response, index)
 
     def download(
         self, hostname: str, version: str, configlet: str = None, last: int = 1

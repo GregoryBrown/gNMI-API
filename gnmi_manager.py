@@ -19,11 +19,11 @@ from protos.gnmi_pb2 import (
     SubscriptionList,
     SubscribeRequest,
 )
-from typing import List, Set, Dict, Tuple, Union, Any
+from typing import List, Set, Dict, Tuple, Union, Any, Iterable
 from datetime import datetime
 from uploader import ElasticSearchUploader
-from responses import ParsedGetResponse, ParsedSetRequest
-from utils import create_gnmi_path
+from responses import ParsedResponse, ParsedSetRequest
+from utils import create_gnmi_path, yang_path_to_es_index
 import json
 
 
@@ -50,19 +50,20 @@ class gNMIManager:
     :type options: List[Tuple[str,str]]
 
     """
-
     def __init__(
-        self,
-        host: str,
-        username: str,
-        password: str,
-        port: str,
-        options: List[Tuple[str, str]] = [("grpc.ssl_target_name_override", "ems.cisco.com")],
+            self,
+            host: str,
+            username: str,
+            password: str,
+            port: str,
+            keys_file: str,
+            options: List[Tuple[str, str]] = [("grpc.ssl_target_name_override", "ems.cisco.com")],
     ) -> None:
         self.host: str = host
         self.username: str = username
         self.password: str = password
         self.port: str = port
+        self.yang_keywords = self._parse_yang_keys_file(keys_file)
         self.options: List[Tuple[str, str]] = options
         self.metadata: List[Tuple[str, str]] = [
             ("username", self.username),
@@ -78,6 +79,10 @@ class gNMIManager:
     def __exit__(self, exc_type, exc_val, exc_tb):
         return False
 
+    def _parse_yang_keys_file(self, keys_file) -> Dict[str, List[str]]:
+        with open(keys_file, "r") as fp:
+            return json.loads(fp.read())
+    
     def _read_pem(self) -> bytes:
         with open(self.pem, "rb") as fp:
             return fp.read()
@@ -91,7 +96,7 @@ class gNMIManager:
             grpc.channel_ready_future(self.channel).result(timeout=10)
             self._connected = True
         except grpc.FutureTimeoutError as e:
-            print(f"Unable to connect to {self.host}:{self.port}")
+            raise GNMIException(f"Unable to connect to {self.host}:{self.port}")
 
     def is_connected(self) -> bool:
         """Checks if connected to gNMI device
@@ -106,7 +111,7 @@ class gNMIManager:
             self.gnmi_stub: gNMIStub = gNMIStub(self.channel)
         return self.gnmi_stub
     
-    def _get_version(self) -> GetResponse:
+    def _get_version(self) -> str:
         stub = self._get_stub()
         get_message: GetRequest = GetRequest(
             path=[
@@ -118,9 +123,15 @@ class gNMIManager:
             encoding=Encoding.Value("JSON_IETF"),
         )
         response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-        return response
+        def _parse_version(version: GetResponse) -> str:
+            for notification in version.notification:
+                for update in notification.update:
+                    rc = update.val.json_ietf_val
+                    rc = rc.decode().strip("}").strip('"')
+            return rc
+        return _parse_version(response)
 
-    def _get_hostname(self) -> GetResponse:
+    def _get_hostname(self) -> str:
         stub = self._get_stub()
         get_message: GetRequest = GetRequest(
             path=[create_gnmi_path("Cisco-IOS-XR-shellutil-cfg:host-names")],
@@ -128,7 +139,15 @@ class gNMIManager:
             encoding=Encoding.Value("JSON_IETF"),
         )
         response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-        return response
+        def _parse_hostname(response: GetResponse) -> str:
+            for notification in response.notification:
+                for update in notification.update:
+                    rc = update.val.json_ietf_val
+                    if not rc:
+                        return ""
+                    else:
+                        return json.loads(rc)["host-name"]
+        return _parse_hostname(response)
 
     def _split_full_config(self, response: GetResponse) -> List[GetResponse]:
         responses = []
@@ -153,7 +172,7 @@ class gNMIManager:
 
     def get_config(
         self, encoding: str, config_models: List[str] = None
-    ) -> Tuple[bool, Union[None, List[ParsedGetResponse]]]:
+    ) -> Tuple[bool, Union[None, List[ParsedResponse]]]:
         """Get configuration of the gNMI device
 
         :param config_model: Yang model of a specific configuration to get, defaults to None, to get the full configuration
@@ -192,9 +211,49 @@ class gNMIManager:
             print(e)
             return False, None
 
+    def _sub_flatten_response(self, encode_path, in_key, in_value, keywords, keys, leaves):
+        ep = encode_path[:]
+        key_temp = keys.copy()
+        ep.append(in_key)
+        if isinstance(in_value, dict):
+            for key, value in in_value.items():
+                self._sub_flatten_response(ep, key, value, keywords, key_temp, leaves)
+        elif isinstance(in_value, list):
+            for item in in_value:
+                if isinstance(item, dict):
+                    for key, value in item.items():
+                        self._sub_flatten_response(ep, key, value, keywords, key_temp, leaves)
+                else:
+                    leaf = ep.pop()
+                    leaves.append({"keys": key_temp, "yang_path" : '/'.join(ep), leaf: item})
+        else:
+            if in_key in keywords:
+                keys[in_key] = in_value
+            else:
+                leaf = ep.pop()
+                leaves.append({"keys": key_temp, "yang_path": '/'.join(ep), leaf: in_value})
+
+    def flatten_response(self, response: GetResponse) -> List[Dict[str,Any]]:
+        encode_path: List[str] = []
+        keys: Dict[str,str] = {}
+        leaves: List[Dict[str,Any]] = []
+        for notification in response.notification:
+            for update in notification.update:
+                for elem in update.path.elem:
+                    encode_path.append(elem.name)
+                keywords = self.yang_keywords[encode_path[0].split(':')[0]]
+                json_value = json.loads(self.get_value(update.val))
+                for key, value in json_value.items():
+                    self._sub_flatten_response(encode_path, key, value, keywords, keys, leaves)
+            for leaf in leaves:
+                leaf["@timestamp"] = int(notification.timestamp) / 1000000
+                leaf["byte_size"] = response.ByteSize()
+                leaf["index"] = yang_path_to_es_index(leaf["yang_path"])
+        return leaves
+
     def get(
             self, encoding: str, oper_models: List[str]
-    ) -> Tuple[bool, Union[None, List[ParsedGetResponse]]]:
+    ) -> List[ParsedResponse]:
         """Get oper data of a gNMI device
 
         :param oper_model: The yang model of the operational data to get
@@ -205,8 +264,8 @@ class gNMIManager:
         try:
             responses = []
             stub = self._get_stub()
-            version: GetResponse = self._get_version()
-            hostname: GetResponse = self._get_hostname()
+            version: str = self._get_version()
+            hostname: str = self._get_hostname()
             for oper_model in oper_models:
                 get_message: GetRequest = GetRequest(
                     path=[create_gnmi_path(oper_model)],
@@ -214,13 +273,13 @@ class gNMIManager:
                     encoding=Encoding.Value(encoding),
                 )
                 response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-                responses.append(ParsedGetResponse(response, version, hostname))
-            return True, responses
+                for flat_response in self.flatten_response(response):
+                    responses.append(ParsedResponse(flat_response, version, hostname))
+            return responses
         except Exception as e:
-            print(e)
-            return False, None
+            raise GNMIException("Failed to complete the Get")
 
-    def set(self, request: SetRequest) -> Tuple[bool, Union[None, SetResponse]]:
+    def set(self, request: SetRequest) -> SetResponse:
         """Set configuration on a gNMI device
 
         :param request: SetRequest to apply on the gNMI device
@@ -230,10 +289,9 @@ class gNMIManager:
         try:
             stub = self._get_stub()
             response = stub.Set(request, metadata=self.metadata)
-            return True, response
+            return response
         except Exception as e:
-            print(e)
-            return False, None
+            raise GNMIException("Failed to complete the Set")
 
     def process_header(self, header):
         index = header.prefix.origin
@@ -243,9 +301,9 @@ class gNMIManager:
             encode_path.append(elem.name)
             if elem.key:
                 keys.update(elem.key)
-        return keys, f"{index}:{'/'.join(encode_path)}"
+        return keys, index, f"{index}:{'/'.join(encode_path)}"
 
-    def get_value(self, type_value):
+    def get_value(self, type_value: TypedValue):
         value_type = type_value.WhichOneof("value")
         return getattr(type_value, value_type)
 
@@ -260,7 +318,7 @@ class gNMIManager:
             sample_rate: int,
             stream_mode: str,
             subscribe_mode: str,
-    ) -> List[str]:
+    ) -> Iterable[ParsedResponse]:
         subs = []
         sample_rate = sample_rate * 1000000000
         for request in requests:
@@ -285,15 +343,20 @@ class gNMIManager:
                 self.sub_to_path(sub_request), metadata=self.metadata
             ):
                 if not response.sync_response:
-                    keys, path = self.process_header(response.update)
+                    keys, index, path = self.process_header(response.update)
+                    bool_requests = [i.startswith(index) for i in requests]
+                    index = requests[[i for i, x in enumerate(bool_requests) if x][0]]
                     for update in response.update.update:
                         rc = []
                         value = self.get_value(update.val)
                         for elem in update.path.elem:
                             rc.append(elem.name)
-                        yield f"{keys}\n{path}/{'/'.join(rc)}={value}"
+                        leaf = rc.pop()
+                        yang_path = f"{path}/{'/'.join(rc)}"
+                        yang_path = yang_path.strip("/")
+                        yield ParsedResponse({"yang_path": yang_path, "keys": keys, leaf: value, "@timestamp": int(response.update.timestamp)/1000000, "byte_size": response.ByteSize(), "index": yang_path_to_es_index(index)}, version, hostname)
         except Exception as e:
-            print(e)
+            raise GNMIException("Failed to complete Subscription")
 
 
 class gNMIManagerTLS(gNMIManager):
@@ -312,4 +375,4 @@ class gNMIManagerTLS(gNMIManager):
             grpc.channel_ready_future(self.channel).result(timeout=10)
             self._connected = True
         except grpc.FutureTimeoutError as e:
-            print(f"Unable to connect to {self.host}:{self.port}")
+            raise GNMIException(f"Unable to connect to {self.host}:{self.port}")

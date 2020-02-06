@@ -1,7 +1,7 @@
 from datetime import datetime
 from protos.gnmi_pb2 import Path, PathElem
 import re
-
+import sys
 
 def create_gnmi_path(path: str) -> Path:
     path_elements: List[str] = []
@@ -31,7 +31,7 @@ def get_date() -> str:
     return ".".join([str(now.year), month, day])
 
 
-def feature_name_to_index(name):
+def yang_path_to_es_index(name):
     index = (
         name.replace("/", "-")
         .lower()
@@ -40,4 +40,8 @@ def feature_name_to_index(name):
         .replace("]", "")
         .replace('"', "")
     )
+    date = get_date()
+    size_of_date = sys.getsizeof(date)
+    while sys.getsizeof(index) + size_of_date > 255:
+        index = '-'.join(index.split('-')[:-1])
     return f"{index}-gnmi-{get_date()}"
