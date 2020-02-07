@@ -1,6 +1,7 @@
 import grpc
 import re
 import json
+from decimal import Decimal
 from protos.gnmi_pb2_grpc import gNMIStub
 from protos.gnmi_pb2 import (
     GetRequest,
@@ -18,12 +19,14 @@ from protos.gnmi_pb2 import (
     SubscriptionMode,
     SubscriptionList,
     SubscribeRequest,
+    Decimal64
 )
 from typing import List, Set, Dict, Tuple, Union, Any, Iterable
 from datetime import datetime
 from uploader import ElasticSearchUploader
 from responses import ParsedResponse, ParsedSetRequest
 from utils import create_gnmi_path, yang_path_to_es_index
+from pprint import pprint
 import json
 
 
@@ -193,7 +196,7 @@ class gNMIManager:
                         encoding=Encoding.Value(encoding),
                     )
                     response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-                    responses.append(ParsedGetResponse(response, version, hostname))
+                    responses.append(ParsedResponse(response, version, hostname))
             else:
                 get_message: GetRequest = GetRequest(
                     path=[Path()],
@@ -205,52 +208,39 @@ class gNMIManager:
                 )
                 split_full_config_response = self._split_full_config(full_config_response)
                 for response in split_full_config_response:
-                    responses.append(ParsedGetResponse(response, version, hostname))
+                    print(response)
+                    responses.append(ParsedResponse(response, version, hostname))
             return True, responses
         except Exception as e:
             print(e)
             return False, None
 
-    def _sub_flatten_response(self, encode_path, in_key, in_value, keywords, keys, leaves):
-        ep = encode_path[:]
+
+
+
+
+
+    def _walk_yang_data(self, start_yang_path, in_key, in_value, keywords, keys, leaves):
+        yp = start_yang_path[:]
         key_temp = keys.copy()
-        ep.append(in_key)
+        yp.append(in_key)
         if isinstance(in_value, dict):
             for key, value in in_value.items():
-                self._sub_flatten_response(ep, key, value, keywords, key_temp, leaves)
+                self._walk_yang_data(yp, key, value, keywords, key_temp, leaves)
         elif isinstance(in_value, list):
             for item in in_value:
                 if isinstance(item, dict):
                     for key, value in item.items():
-                        self._sub_flatten_response(ep, key, value, keywords, key_temp, leaves)
+                        self._walk_yang_data(yp, key, value, keywords, key_temp, leaves)
                 else:
-                    leaf = ep.pop()
-                    leaves.append({"keys": key_temp, "yang_path" : '/'.join(ep), leaf: item})
+                    leaves.append({"keys": key_temp, "yang_path" : '/'.join(yp), "value": item})
         else:
             if in_key in keywords:
                 keys[in_key] = in_value
             else:
-                leaf = ep.pop()
-                leaves.append({"keys": key_temp, "yang_path": '/'.join(ep), leaf: in_value})
+                leaves.append({"keys": key_temp, "yang_path": '/'.join(yp), "value": in_value})
 
-    def flatten_response(self, response: GetResponse) -> List[Dict[str,Any]]:
-        encode_path: List[str] = []
-        keys: Dict[str,str] = {}
-        leaves: List[Dict[str,Any]] = []
-        for notification in response.notification:
-            for update in notification.update:
-                for elem in update.path.elem:
-                    encode_path.append(elem.name)
-                keywords = self.yang_keywords[encode_path[0].split(':')[0]]
-                json_value = json.loads(self.get_value(update.val))
-                for key, value in json_value.items():
-                    self._sub_flatten_response(encode_path, key, value, keywords, keys, leaves)
-            for leaf in leaves:
-                leaf["@timestamp"] = int(notification.timestamp) / 1000000
-                leaf["byte_size"] = response.ByteSize()
-                leaf["index"] = yang_path_to_es_index(leaf["yang_path"])
-        return leaves
-
+                
     def get(
             self, encoding: str, oper_models: List[str]
     ) -> List[ParsedResponse]:
@@ -273,12 +263,38 @@ class gNMIManager:
                     encoding=Encoding.Value(encoding),
                 )
                 response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-                for flat_response in self.flatten_response(response):
-                    responses.append(ParsedResponse(flat_response, version, hostname))
-            return responses
+                rc = []
+                for notification in response.notification:
+                    start_yang_path = []
+                    sub_yang_path: List[str] = []
+                    yang_keys: Dict[str,str] = {}
+                    sub_yang_info: List[Dict[str,Any]] = []
+                    for update in notification.update:
+                        for elem in update.path.elem:
+                            start_yang_path.append(elem.name)
+                        keywords = self.yang_keywords[start_yang_path[0].split(':')[0]]
+                        response_value  = self.get_value(update.val)
+                        if update.val.WhichOneof("value") in ["json_val", "json_ietf_val"]:
+                            for key, value in response_value.items():
+                                self._walk_yang_data(sub_yang_path, key, value, keywords, yang_keys, sub_yang_info)
+                            for sub_yang in sub_yang_info:
+                                parsed_dict = {}
+                                parsed_dict["@timestamp"] = int(notification.timestamp)/1000000
+                                parsed_dict["byte_size"] = response.ByteSize()
+                                parsed_dict["keys"] = sub_yang["keys"]
+                                yang_path = sub_yang['yang_path']
+                                parsed_dict["yang_path"] = f"{start_yang_path[0]}/{yang_path}"
+                                leaf = '-'.join(parsed_dict["yang_path"].split('/')[-2:])
+                                parsed_dict[leaf] = sub_yang["value"]
+                                parsed_dict["index"] = yang_path_to_es_index(parsed_dict["yang_path"])
+                                rc.append(ParsedResponse(parsed_dict, version, hostname))
+                        else:
+                            raise GNMIException("Unsupported Get encoding")
+                return rc
         except Exception as e:
             raise GNMIException("Failed to complete the Get")
 
+        
     def set(self, request: SetRequest) -> SetResponse:
         """Set configuration on a gNMI device
 
@@ -294,18 +310,36 @@ class gNMIManager:
             raise GNMIException("Failed to complete the Set")
 
     def process_header(self, header):
-        index = header.prefix.origin
         keys = {}
-        encode_path = []
+        yang_path = []
         for elem in header.prefix.elem:
-            encode_path.append(elem.name)
+            yang_path.append(elem.name)
             if elem.key:
                 keys.update(elem.key)
-        return keys, index, f"{index}:{'/'.join(encode_path)}"
+        return keys, f"{header.prefix.origin}:{'/'.join(yang_path)}"
+
 
     def get_value(self, type_value: TypedValue):
         value_type = type_value.WhichOneof("value")
-        return getattr(type_value, value_type)
+        def leaflist_parse(value):
+            value_list = []
+            for element in value.element:
+                value_type = element.WhichOneof("value")
+                func = value_encodings[value_type]
+                value_list.append(func(getattr(element, value_type)))
+            return value_list
+        
+        def decimal_parse(value):
+            return value.digits
+        
+        value_encodings = {"string_val": str, "int_val": int, "uint_val": int, "bool_val": bool,
+                           "bytes_val": bytes, "float_val": float, "decimal_val": decimal_parse,
+                           "leaflist_val": leaflist_parse, "json_val": json.loads,
+                           "json_ietf_val": json.loads, "ascii_val": str,
+                           "proto_bytes": bytes}    
+        print(type_value)
+        func = value_encodings[value_type]
+        return func(getattr(type_value, value_type))        
 
     @staticmethod
     def sub_to_path(request: SetRequest) -> SetRequest:
@@ -343,18 +377,22 @@ class gNMIManager:
                 self.sub_to_path(sub_request), metadata=self.metadata
             ):
                 if not response.sync_response:
-                    keys, index, path = self.process_header(response.update)
-                    bool_requests = [i.startswith(index) for i in requests]
-                    index = requests[[i for i, x in enumerate(bool_requests) if x][0]]
                     for update in response.update.update:
+                        parsed_dict = {}
+                        parsed_dict["@timestamp"] = int(response.update.timestamp)/1000000
+                        parsed_dict["byte_size"] = response.ByteSize()
+                        keys, start_yang_path = self.process_header(response.update)
+                        parsed_dict["keys"] = keys
                         rc = []
                         value = self.get_value(update.val)
                         for elem in update.path.elem:
                             rc.append(elem.name)
-                        leaf = rc.pop()
-                        yang_path = f"{path}/{'/'.join(rc)}"
-                        yang_path = yang_path.strip("/")
-                        yield ParsedResponse({"yang_path": yang_path, "keys": keys, leaf: value, "@timestamp": int(response.update.timestamp)/1000000, "byte_size": response.ByteSize(), "index": yang_path_to_es_index(index)}, version, hostname)
+                        total_yang_path = f"{start_yang_path}/{'/'.join(rc)}"
+                        leaf = '-'.join(total_yang_path.split('/')[-2:])
+                        parsed_dict[leaf] = value
+                        parsed_dict["index"] = yang_path_to_es_index(total_yang_path)
+                        parsed_dict["yang_path"] = total_yang_path
+                        yield ParsedResponse(parsed_dict, version, hostname)
         except Exception as e:
             raise GNMIException("Failed to complete Subscription")
 

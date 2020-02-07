@@ -77,14 +77,13 @@ class ElasticSearchUploader:
         """
         headers = {"Content-Type": "application/json"}
         post_data = dict({"host": data.hostname, "version": data.version}, **data.dict_to_upload)
-        print(post_data)
-        print("\n")
+        #print(post_data)
+        #print("\n")
         post_response = request(
             "POST", f"{self.url}/{index}/_doc", json=post_data, headers=headers,
         )
         if not post_response.status_code in [200, 201]:
-            pass
-            #raise ElasticSearchUploaderException("Error while posting data to ElasticSearch")
+            raise ElasticSearchUploaderException("Error while posting data to ElasticSearch")
 
     def upload(self, data: List[ParsedResponse]):
         """Upload operation data into Elasticsearch
