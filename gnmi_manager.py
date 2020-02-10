@@ -23,10 +23,8 @@ from protos.gnmi_pb2 import (
 )
 from typing import List, Set, Dict, Tuple, Union, Any, Iterable
 from datetime import datetime
-from uploader import ElasticSearchUploader
 from responses import ParsedResponse, ParsedSetRequest
 from utils import create_gnmi_path, yang_path_to_es_index
-from pprint import pprint
 import json
 
 
@@ -55,18 +53,22 @@ class gNMIManager:
     """
     def __init__(
             self,
+            pem: str,
             host: str,
             username: str,
             password: str,
             port: str,
-            keys_file: str,
+            keys_file: str = None,
             options: List[Tuple[str, str]] = [("grpc.ssl_target_name_override", "ems.cisco.com")],
     ) -> None:
         self.host: str = host
         self.username: str = username
         self.password: str = password
         self.port: str = port
-        self.yang_keywords = self._parse_yang_keys_file(keys_file)
+        if keys_file:
+            self.yang_keywords = self._parse_yang_keys_file(keys_file)
+        else:
+            self.yang_keywords = []
         self.options: List[Tuple[str, str]] = options
         self.metadata: List[Tuple[str, str]] = [
             ("username", self.username),
@@ -74,9 +76,18 @@ class gNMIManager:
         ]
         self._connected: bool = False
         self.gnmi_stub: gNMIStub = None
+        self.channel = None
+        if pem is not None:
+            with open(pem, "rb") as fp:
+                self.pem = fp.read()
+        else:
+            self.pem = None
 
+        
     def __enter__(self):
         self.connect()
+        self.hostname = self._get_hostname()
+        self.version = self._get_version()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -86,20 +97,21 @@ class gNMIManager:
         with open(keys_file, "r") as fp:
             return json.loads(fp.read())
     
-    def _read_pem(self) -> bytes:
-        with open(self.pem, "rb") as fp:
-            return fp.read()
-
     def connect(self) -> None:
         """Connet to the gNMI device
 
         """
         try:
-            self.channel = grpc.insecure_channel(":".join([self.host, self.port]))
+            if self.pem is None:
+                self.channel: grpc.insecure_channel = grpc.insecure_channel(':'.join([self.host, self.port]), self.options)
+            else:
+                credentials: grpc.ssl_channel_credentials = grpc.ssl_channel_credentials(self.pem)
+                self.channel: grpc.secure_channel = grpc.secure_channel(':'.join([self.host, self.port]), credentials, self.options)
+
             grpc.channel_ready_future(self.channel).result(timeout=10)
             self._connected = True
-        except grpc.FutureTimeoutError as e:
-            raise GNMIException(f"Unable to connect to {self.host}:{self.port}")
+        except grpc.FutureTimeoutError:
+            raise GNMIException(f'Unable to connect to "{self.host}:{self.port}"')
 
     def is_connected(self) -> bool:
         """Checks if connected to gNMI device
@@ -175,7 +187,7 @@ class gNMIManager:
 
     def get_config(
         self, encoding: str, config_models: List[str] = None
-    ) -> Tuple[bool, Union[None, List[ParsedResponse]]]:
+    ) -> List[ParsedResponse]:
         """Get configuration of the gNMI device
 
         :param config_model: Yang model of a specific configuration to get, defaults to None, to get the full configuration
@@ -208,12 +220,10 @@ class gNMIManager:
                 )
                 split_full_config_response = self._split_full_config(full_config_response)
                 for response in split_full_config_response:
-                    print(response)
                     responses.append(ParsedResponse(response, version, hostname))
-            return True, responses
+            return responses
         except Exception as e:
-            print(e)
-            return False, None
+             raise GNMIException("Failed to complete the Get Config") 
 
 
 
@@ -254,8 +264,6 @@ class gNMIManager:
         try:
             responses = []
             stub = self._get_stub()
-            version: str = self._get_version()
-            hostname: str = self._get_hostname()
             for oper_model in oper_models:
                 get_message: GetRequest = GetRequest(
                     path=[create_gnmi_path(oper_model)],
@@ -300,7 +308,7 @@ class gNMIManager:
                                 leaf = '-'.join(parsed_dict["yang_path"].split('/')[-2:])
                                 parsed_dict[leaf] = sub_yang["value"]
                                 parsed_dict["index"] = yang_path_to_es_index(parsed_dict["yang_path"])
-                                rc.append(ParsedResponse(parsed_dict, version, hostname))
+                                rc.append(ParsedResponse(parsed_dict, self.version, self.hostname))
                         else:
                             raise GNMIException("Unsupported Get encoding")
                 return rc
@@ -383,8 +391,6 @@ class gNMIManager:
         )
         sub_request = SubscribeRequest(subscribe=sub_list)
         try:
-            version: GetResponse = self._get_version()
-            hostname: GetResponse = self._get_hostname()
             stub = self._get_stub()
             for response in stub.Subscribe(
                 self.sub_to_path(sub_request), metadata=self.metadata
@@ -405,25 +411,8 @@ class gNMIManager:
                         parsed_dict[leaf] = value
                         parsed_dict["index"] = yang_path_to_es_index(total_yang_path)
                         parsed_dict["yang_path"] = total_yang_path
-                        yield ParsedResponse(parsed_dict, version, hostname)
+                        yield ParsedResponse(parsed_dict, self.version, self.hostname)
         except Exception as e:
             raise GNMIException("Failed to complete Subscription")
 
 
-class gNMIManagerTLS(gNMIManager):
-    def __init__(self, pem, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.pem: str = pem
-
-    def connect(self) -> None:
-        try:
-            credentials: grpc.ssl_channel_credentials = grpc.ssl_channel_credentials(
-                self._read_pem()
-            )
-            self.channel: grpc.secure_channel = grpc.secure_channel(
-                ":".join([self.host, self.port]), credentials, self.options
-            )
-            grpc.channel_ready_future(self.channel).result(timeout=10)
-            self._connected = True
-        except grpc.FutureTimeoutError as e:
-            raise GNMIException(f"Unable to connect to {self.host}:{self.port}")
