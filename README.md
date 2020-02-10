@@ -63,7 +63,7 @@ Run pyang with the keys option on the yang file(s) you want to generate keys for
 ### Get Operational Data
 ```python
 def main() -> None:
-    with gNMIManagerTLS("9904-Oberyn.pem", "[2001:10:8:70::11]", "lab", "lab", "57410", "yang-keys-663.txt") as manager:
+    with gNMIManager("9904-Oberyn.pem", "[2001:10:8:70::11]", "lab", "lab", "57410", "yang-keys-663.txt") as manager:
         responses = manager.get("JSON_IETF", ['Cisco-IOS-XR-infra-policymgr-oper:policy-manager/global'])
         for response in responses:
             print(response)
@@ -72,7 +72,7 @@ def main() -> None:
 ### Subscribe to Operational Data
 ```python
 def main() -> None:
-    with gNMIManagerTLS("9904-Oberyn.pem", "[2001:10:8:70::11]", "lab", "lab", "57410", "yang-keys-663.txt") as manager:
+    with gNMIManager("[2001:10:8:70::11]", "lab", "lab", "57410", "yang-keys-663.txt") as manager:
         for response in manager.subscribe("PROTO", ['Cisco-IOS-XR-infra-policymgr-oper:policy-manager/global'], 6, "STREAM", "SAMPLE"):         
             print(response)    
 ```
