@@ -266,24 +266,37 @@ class gNMIManager:
                 rc = []
                 for notification in response.notification:
                     start_yang_path = []
+                    start_yang_keys = {}
                     sub_yang_path: List[str] = []
-                    yang_keys: Dict[str,str] = {}
                     sub_yang_info: List[Dict[str,Any]] = []
                     for update in notification.update:
                         for elem in update.path.elem:
                             start_yang_path.append(elem.name)
+                            if elem.key:
+                                for key, value in elem.key.items():
+                                    if isinstance(value, str):
+                                        start_yang_keys[key] = value.replace('"','').replace("'",'')
+                                    else:
+                                        start_yang_keys[key] = value
                         keywords = self.yang_keywords[start_yang_path[0].split(':')[0]]
+                        start_yang_path = '/'.join(start_yang_path)
                         response_value  = self.get_value(update.val)
                         if update.val.WhichOneof("value") in ["json_val", "json_ietf_val"]:
-                            for key, value in response_value.items():
-                                self._walk_yang_data(sub_yang_path, key, value, keywords, yang_keys, sub_yang_info)
+                            if isinstance(response_value, list):
+                                for sub_response_value in response_value:
+                                    for key, value in sub_response_value.items():
+                                        self._walk_yang_data(sub_yang_path, key, value, keywords, start_yang_keys, sub_yang_info)
+                            else:
+                                for key, value in response_value.items():
+                                    self._walk_yang_data(sub_yang_path, key, value, keywords, start_yang_keys, sub_yang_info)
+
                             for sub_yang in sub_yang_info:
                                 parsed_dict = {}
                                 parsed_dict["@timestamp"] = int(notification.timestamp)/1000000
                                 parsed_dict["byte_size"] = response.ByteSize()
                                 parsed_dict["keys"] = sub_yang["keys"]
                                 yang_path = sub_yang['yang_path']
-                                parsed_dict["yang_path"] = f"{start_yang_path[0]}/{yang_path}"
+                                parsed_dict["yang_path"] = f"{start_yang_path}/{yang_path}"
                                 leaf = '-'.join(parsed_dict["yang_path"].split('/')[-2:])
                                 parsed_dict[leaf] = sub_yang["value"]
                                 parsed_dict["index"] = yang_path_to_es_index(parsed_dict["yang_path"])
