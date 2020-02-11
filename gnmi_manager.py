@@ -68,11 +68,10 @@ class GNMIManager:
         ]
         self._connected: bool = False
         self.channel = None
+        self.pem_bytes: bytes = b""
         if pem is not None:
             with open(pem, "rb") as fp:
-                self.pem = fp.read().decode()
-        else:
-            self.pem = ""
+                self.pem_bytes = fp.read()
 
     def __enter__(self):
         self.connect()
@@ -93,12 +92,12 @@ class GNMIManager:
 
         """
         try:
-            if self.pem is None:
+            if self.pem_bytes is None:
                 self.channel: grpc.insecure_channel = grpc.insecure_channel(
                     ":".join([self.host, self.port]), self.options
                 )
             else:
-                credentials: grpc.ssl_channel_credentials = grpc.ssl_channel_credentials(self.pem)
+                credentials: grpc.ssl_channel_credentials = grpc.ssl_channel_credentials(self.pem_bytes)
                 self.channel: grpc.secure_channel = grpc.secure_channel(
                     ":".join([self.host, self.port]), credentials, self.options
                 )
