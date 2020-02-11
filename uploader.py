@@ -12,10 +12,12 @@ from typing import List, Set, Dict, Tuple, Union, Any
 from requests import request
 from utils import yang_path_to_es_index
 
+
 class ElasticSearchUploaderException(Exception):
     """ Exception for ElasticSearchUploader Errors """
 
     pass
+
 
 class ElasticSearchUploader:
     """ElasticSearchUploader creates an object that can upload GetResponses, and download SetRequests from an ElasticSearch instance
@@ -43,11 +45,10 @@ class ElasticSearchUploader:
         index_put_response = request(
             "PUT", f"{self.url}/{index}", headers=headers, json=mapping
         )
-        
+
         if not index_put_response.status_code == 200:
             print(index_put_response.json())
             raise ElasticSearchUploaderException(f"Error putting {index} in ES")
-        
 
     def _populate_index_list(self) -> List[str]:
         """Query the Elasticsearch for all of the indices
@@ -59,7 +60,9 @@ class ElasticSearchUploader:
         index_list: List[str] = []
         get_response = request("GET", f"{self.url}/*")
         if not get_response.status_code == 200:
-            raise ElasticSearchUploaderException("Unable to get index list from ElasticSearch")
+            raise ElasticSearchUploaderException(
+                "Unable to get index list from ElasticSearch"
+            )
         for key in get_response.json():
             if not key.startswith("."):
                 index_list.append(key)
@@ -76,14 +79,18 @@ class ElasticSearchUploader:
 
         """
         headers = {"Content-Type": "application/json"}
-        post_data = dict({"host": data.hostname, "version": data.version}, **data.dict_to_upload)
-        #print(post_data)
-        #print("\n")
+        post_data = dict(
+            {"host": data.hostname, "version": data.version}, **data.dict_to_upload
+        )
+        # print(post_data)
+        # print("\n")
         post_response = request(
             "POST", f"{self.url}/{index}/_doc", json=post_data, headers=headers,
         )
         if not post_response.status_code in [200, 201]:
-            raise ElasticSearchUploaderException("Error while posting data to ElasticSearch")
+            raise ElasticSearchUploaderException(
+                "Error while posting data to ElasticSearch"
+            )
 
     def upload(self, data: List[ParsedResponse]):
         """Upload operation data into Elasticsearch

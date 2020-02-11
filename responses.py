@@ -62,7 +62,6 @@ class ParsedResponse:
         self.version: str = version
         self.hostname: str = hostname
         self.dict_to_upload: Dict[str, Any] = response
-        
+
     def __str__(self):
         return f"{self.hostname}\n{self.version}\n{self.dict_to_upload}"
-        

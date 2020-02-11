@@ -3,6 +3,7 @@ from protos.gnmi_pb2 import Path, PathElem
 import re
 import sys
 
+
 def create_gnmi_path(path: str) -> Path:
     path_elements: List[str] = []
     path_list: List[str] = []
@@ -43,5 +44,5 @@ def yang_path_to_es_index(name):
     date = get_date()
     size_of_date = sys.getsizeof(date)
     while sys.getsizeof(index) + size_of_date > 255:
-        index = '-'.join(index.split('-')[:-1])
+        index = "-".join(index.split("-")[:-1])
     return f"{index}-gnmi-{get_date()}"
