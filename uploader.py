@@ -8,19 +8,14 @@
 
 """
 from responses import ParsedResponse, ParsedSetRequest
-from typing import List, Set, Dict, Tuple, Union, Any
+from typing import List, Dict, Any
 from requests import request
 from utils import yang_path_to_es_index
-
-
-class ElasticSearchUploaderException(Exception):
-    """ Exception for ElasticSearchUploader Errors """
-
-    pass
+from errors import ElasticSearchUploaderException
 
 
 class ElasticSearchUploader:
-    """ElasticSearchUploader creates an object that can upload GetResponses, and download SetRequests from an ElasticSearch instance
+    """ElasticSearchUploader creates a connection to an ElasticSearch instance
 
     :param elastic_server: The IP of the ElasticSearch instance
     :type elastic_server: str
@@ -33,7 +28,7 @@ class ElasticSearchUploader:
         self.url: str = f"http://{elastic_server}:{elastic_port}"
 
     def _put_index(self, index: str) -> None:
-        """Put an index into the ElasticSeearch instance
+        """Put an index into the ElasticSearch instance
 
         :param index: The index name to put into the ES instance, formatted for ES 7.0+
         :type index: str
@@ -82,12 +77,10 @@ class ElasticSearchUploader:
         post_data = dict(
             {"host": data.hostname, "version": data.version}, **data.dict_to_upload
         )
-        # print(post_data)
-        # print("\n")
         post_response = request(
             "POST", f"{self.url}/{index}/_doc", json=post_data, headers=headers,
         )
-        if not post_response.status_code in [200, 201]:
+        if post_response.status_code not in [200, 201]:
             raise ElasticSearchUploaderException(
                 "Error while posting data to ElasticSearch"
             )
@@ -109,7 +102,7 @@ class ElasticSearchUploader:
             self._post_parsed_response(parsed_response, index)
 
     def download(
-        self, hostname: str, version: str, configlet: str = None, last: int = 1
+            self, hostname: str, version: str, configlet: str = None, last: int = 1
     ) -> ParsedSetRequest:
         """Download a configuration from Elasticsearch
 
@@ -154,7 +147,7 @@ class ElasticSearchUploader:
         for feature in feature_list:
             post_response = request(
                 "POST",
-                f"{self.url}/{feature_name_to_index(feature)}*/_search",
+                f"{self.url}/{yang_path_to_es_index(feature)}*/_search",
                 json=search_request,
                 headers=headers,
             )

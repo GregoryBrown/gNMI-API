@@ -1,3 +1,12 @@
+"""
+.. module:: utils
+   :platform: Unix, Windows
+   :synopsis: Contains some utility functions that are used in the api
+
+.. moduleauthor:: Greg Brown <gsb5067@gmail.com>
+
+"""
+from typing import List
 from datetime import datetime
 from protos.gnmi_pb2 import Path, PathElem
 import re
@@ -6,7 +15,6 @@ import sys
 
 def create_gnmi_path(path: str) -> Path:
     path_elements: List[str] = []
-    path_list: List[str] = []
     if path[0] == "/":
         if path[-1] == "/":
             path_list = re.split(r"""/(?=(?:[^\[\]]|\[[^\[\]]+\])*$)""", path)[1:-1]
@@ -33,7 +41,7 @@ def get_date() -> str:
 
 
 def yang_path_to_es_index(name):
-    index = (
+    index: str = (
         name.replace("/", "-")
         .lower()
         .replace(":", "-")
@@ -41,8 +49,8 @@ def yang_path_to_es_index(name):
         .replace("]", "")
         .replace('"', "")
     )
-    date = get_date()
-    size_of_date = sys.getsizeof(date)
+    date: str = get_date()
+    size_of_date: int = sys.getsizeof(date)
     while sys.getsizeof(index) + size_of_date > 255:
         index = "-".join(index.split("-")[:-1])
     return f"{index}-gnmi-{get_date()}"

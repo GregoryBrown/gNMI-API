@@ -1,14 +1,18 @@
+"""
+.. module:: gnmi_manager
+   :platform: Unix, Windows
+   :synopsis: Used to connect to a gNMI device and perform operations on it
+
+.. moduleauthor:: Greg Brown <gsb5067@gmail.com>
+
+
+"""
 import grpc
-import re
-import json
-from decimal import Decimal
 from protos.gnmi_pb2_grpc import gNMIStub
 from protos.gnmi_pb2 import (
     GetRequest,
     GetResponse,
     Path,
-    PathElem,
-    CapabilityRequest,
     Encoding,
     SetRequest,
     Update,
@@ -18,35 +22,28 @@ from protos.gnmi_pb2 import (
     Subscription,
     SubscriptionMode,
     SubscriptionList,
-    SubscribeRequest,
-    Decimal64,
+    SubscribeRequest
 )
-from typing import List, Set, Dict, Tuple, Union, Any, Iterable
-from datetime import datetime
-from responses import ParsedResponse, ParsedSetRequest
+from typing import List, Dict, Tuple, Any, Iterable
+from responses import ParsedResponse
 from utils import create_gnmi_path, yang_path_to_es_index
+from errors import GNMIException
 import json
 
 
-class GNMIException(Exception):
-    """ Exception for GNMI API Errors """
+class GNMIManager:
+    """Opens a gRPC connection to the device and allows to issue gNMI requests
 
-    pass
-
-
-class gNMIManager:
-    """Opens a gRPC connection to the device and allows to issue gNMI reqeusts
-
+    :param pem: The location of the pem file if you are using TLS
+    :type pem: str
     :param host: The IP address of the gNMI device
     :type host: str
-    :param username: The useranme used to authenticate
+    :param username: The username used to authenticate
     :type username: str
     :param password: The password used to authenticate
     :type password: str
     :param port: The port of the gNMI device
     :type port: str
-    :param pem: The location of the pem file used to authenticate
-    :type pem: str
     :param options: Options to be passed to the gRPC channel
     :type options: List[Tuple[str,str]]
 
@@ -60,31 +57,31 @@ class gNMIManager:
         password: str,
         port: str,
         keys_file: str = None,
-        options: List[Tuple[str, str]] = [
-            ("grpc.ssl_target_name_override", "ems.cisco.com")
-        ],
+            options=None,
     ) -> None:
+        if options is None:
+            options = [
+                ("grpc.ssl_target_name_override", "ems.cisco.com")
+            ]
         self.host: str = host
         self.username: str = username
         self.password: str = password
         self.port: str = port
+        self.yang_keywords: Dict[str, List[str]] = {}
         if keys_file:
             self.yang_keywords = self._parse_yang_keys_file(keys_file)
-        else:
-            self.yang_keywords = []
         self.options: List[Tuple[str, str]] = options
         self.metadata: List[Tuple[str, str]] = [
             ("username", self.username),
             ("password", self.password),
         ]
         self._connected: bool = False
-        self.gnmi_stub: gNMIStub = None
         self.channel = None
         if pem is not None:
             with open(pem, "rb") as fp:
-                self.pem = fp.read()
+                self.pem = fp.read().decode()
         else:
-            self.pem = None
+            self.pem = ""
 
     def __enter__(self):
         self.connect()
@@ -95,12 +92,13 @@ class gNMIManager:
     def __exit__(self, exc_type, exc_val, exc_tb):
         return False
 
-    def _parse_yang_keys_file(self, keys_file) -> Dict[str, List[str]]:
+    @staticmethod
+    def _parse_yang_keys_file(keys_file) -> Dict[str, List[str]]:
         with open(keys_file, "r") as fp:
             return json.loads(fp.read())
 
     def connect(self) -> None:
-        """Connet to the gNMI device
+        """Connect to the gNMI device
 
         """
         try:
@@ -148,6 +146,7 @@ class gNMIManager:
         response: GetResponse = stub.Get(get_message, metadata=self.metadata)
 
         def _parse_version(version: GetResponse) -> str:
+            rc = ""
             for notification in version.notification:
                 for update in notification.update:
                     rc = update.val.json_ietf_val
@@ -165,8 +164,8 @@ class gNMIManager:
         )
         response: GetResponse = stub.Get(get_message, metadata=self.metadata)
 
-        def _parse_hostname(response: GetResponse) -> str:
-            for notification in response.notification:
+        def _parse_hostname(hostname_response: GetResponse) -> str:
+            for notification in hostname_response.notification:
                 for update in notification.update:
                     rc = update.val.json_ietf_val
                     if not rc:
@@ -176,24 +175,26 @@ class gNMIManager:
 
         return _parse_hostname(response)
 
-    def _split_full_config(self, response: GetResponse) -> List[GetResponse]:
-        responses = []
+    @staticmethod
+    def _split_full_config(response: GetResponse) -> List[GetResponse]:
+        responses: List[GetResponse] = []
+        full_config_json: Dict[str, Any] = {}
         timestamp = [n.timestamp for n in response.notification][0]
         for notification in response.notification:
             for update in notification.update:
                 full_config_json = json.loads(update.val.json_ietf_val)
-        models = []
+        models: List[str] = []
         for model, config in full_config_json.items():
-            str_config = json.dumps(config)
-            type_config_val = TypedValue(json_ietf_val=str_config.encode())
-            up = Update(path=create_gnmi_path(model), val=type_config_val)
-            notification = Notification(update=[up], timestamp=timestamp)
+            str_config: str = json.dumps(config)
+            type_config_val: TypedValue = TypedValue(json_ietf_val=str_config.encode())
+            up: Update = Update(path=create_gnmi_path(model), val=type_config_val)
+            notification: Notification = Notification(update=[up], timestamp=timestamp)
             responses.append(GetResponse(notification=[notification]))
             models.append(model)
-        model_str_config = json.dumps({"configs": models})
-        model_type_config_val = TypedValue(json_ietf_val=model_str_config.encode())
-        up = Update(path=create_gnmi_path("router-configs"), val=model_type_config_val)
-        notification = Notification(update=[up], timestamp=timestamp)
+        model_str_config: str = json.dumps({"configs": models})
+        model_type_config_val: TypedValue = TypedValue(json_ietf_val=model_str_config.encode())
+        up: Update = Update(path=create_gnmi_path("router-configs"), val=model_type_config_val)
+        notification: Notification = Notification(update=[up], timestamp=timestamp)
         responses.append(GetResponse(notification=[notification]))
         return responses
 
@@ -202,16 +203,18 @@ class gNMIManager:
     ) -> List[ParsedResponse]:
         """Get configuration of the gNMI device
 
-        :param config_model: Yang model of a specific configuration to get, defaults to None, to get the full configuration
-        :type config_model: str
-        :returns: Tuple of bool and ParsedGetResponse
+        :param encoding: The encoding to use to for the Get Config operation
+        :type encoding: str
+        :param config_models: Yang model(s) of a specific configuration to get
+        :type config_models: str
+        :returns: A List of ParsedResponse of configuration data
 
         """
         try:
             version: GetResponse = self._get_version()
             hostname: GetResponse = self._get_hostname()
-            stub = self._get_stub()
-            responses = []
+            stub: gNMIStub = self._get_stub()
+            responses: List[ParsedResponse] = []
             if config_models:
                 for config_model in config_models:
                     get_message: GetRequest = GetRequest(
@@ -232,20 +235,20 @@ class gNMIManager:
                 full_config_response: GetResponse = stub.Get(
                     get_message, metadata=self.metadata
                 )
-                split_full_config_response = self._split_full_config(
+                split_full_config_response: List[Dict[str, Any]] = self._split_full_config(
                     full_config_response
                 )
                 for response in split_full_config_response:
                     responses.append(ParsedResponse(response, version, hostname))
             return responses
         except Exception as e:
-            raise GNMIException("Failed to complete the Get Config")
+            raise GNMIException(f"Failed to complete the Get Config:\n {e}")
 
     def _walk_yang_data(
         self, start_yang_path, in_key, in_value, keywords, keys, leaves
     ):
-        yp = start_yang_path[:]
-        key_temp = keys.copy()
+        yp: List[str] = start_yang_path[:]
+        key_temp: Dict[str, Any] = keys.copy()
         yp.append(in_key)
         if isinstance(in_value, dict):
             for key, value in in_value.items():
@@ -270,14 +273,15 @@ class gNMIManager:
     def get(self, encoding: str, oper_models: List[str]) -> List[ParsedResponse]:
         """Get oper data of a gNMI device
 
-        :param oper_model: The yang model of the operational data to get
-        :type oper_model: str
-        :returns: Tuple of bool and ParsedGetResponse
+        :param encoding: The encoding to use to for the Get operation
+        :type encoding: str
+        :param oper_models: The yang model of the operational data to get
+        :type oper_models: List[str]
+        :returns: A list of ParsedResponse of the flatten operational data
 
         """
         try:
-            responses = []
-            stub = self._get_stub()
+            stub: gNMIStub = self._get_stub()
             for oper_model in oper_models:
                 get_message: GetRequest = GetRequest(
                     path=[create_gnmi_path(oper_model)],
@@ -285,10 +289,10 @@ class gNMIManager:
                     encoding=Encoding.Value(encoding),
                 )
                 response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-                rc = []
+                rc: List[ParsedResponse] = []
                 for notification in response.notification:
-                    start_yang_path = []
-                    start_yang_keys = {}
+                    start_yang_path: List[str] = []
+                    start_yang_keys: Dict[str, str] = {}
                     sub_yang_path: List[str] = []
                     sub_yang_info: List[Dict[str, Any]] = []
                     for update in notification.update:
@@ -303,8 +307,8 @@ class gNMIManager:
                                     else:
                                         start_yang_keys[key] = value
                         keywords = self.yang_keywords[start_yang_path[0].split(":")[0]]
-                        start_yang_path = "/".join(start_yang_path)
-                        response_value = self.get_value(update.val)
+                        start_yang_path: str = "/".join(start_yang_path)
+                        response_value: Any = self.get_value(update.val)
                         if update.val.WhichOneof("value") in [
                             "json_val",
                             "json_ietf_val",
@@ -332,12 +336,9 @@ class gNMIManager:
                                     )
 
                             for sub_yang in sub_yang_info:
-                                parsed_dict = {}
-                                parsed_dict["@timestamp"] = (
-                                    int(notification.timestamp) / 1000000
-                                )
-                                parsed_dict["byte_size"] = response.ByteSize()
-                                parsed_dict["keys"] = sub_yang["keys"]
+                                parsed_dict = {"@timestamp": (
+                                        int(notification.timestamp) / 1000000
+                                ), "byte_size": response.ByteSize(), "keys": sub_yang["keys"]}
                                 yang_path = sub_yang["yang_path"]
                                 parsed_dict[
                                     "yang_path"
@@ -358,13 +359,13 @@ class gNMIManager:
                             raise GNMIException("Unsupported Get encoding")
                 return rc
         except Exception as e:
-            raise GNMIException("Failed to complete the Get")
+            raise GNMIException(f"Failed to complete the Get:\n {e}")
 
     def set(self, request: SetRequest) -> SetResponse:
         """Set configuration on a gNMI device
 
         :param request: SetRequest to apply on the gNMI device
-        :returns: Tuple of bool and SetRequest
+        :returns: SetRequest
 
         """
         try:
@@ -372,9 +373,10 @@ class gNMIManager:
             response = stub.Set(request, metadata=self.metadata)
             return response
         except Exception as e:
-            raise GNMIException("Failed to complete the Set")
+            raise GNMIException(f"Failed to complete the Set:\n {e}")
 
-    def process_header(self, header):
+    @staticmethod
+    def process_header(header):
         keys = {}
         yang_path = []
         for elem in header.prefix.elem:
@@ -383,15 +385,16 @@ class gNMIManager:
                 keys.update(elem.key)
         return keys, f"{header.prefix.origin}:{'/'.join(yang_path)}"
 
-    def get_value(self, type_value: TypedValue):
+    @staticmethod
+    def get_value(type_value: TypedValue):
         value_type = type_value.WhichOneof("value")
 
-        def leaflist_parse(value):
+        def leaf_list_parse(value):
             value_list = []
             for element in value.element:
-                value_type = element.WhichOneof("value")
-                func = value_encodings[value_type]
-                value_list.append(func(getattr(element, value_type)))
+                value_type_leaf_parse = element.WhichOneof("value")
+                func_leaf_parse = value_encodings[value_type]
+                value_list.append(func_leaf_parse(getattr(element, value_type_leaf_parse)))
             return value_list
 
         def decimal_parse(value):
@@ -405,7 +408,7 @@ class gNMIManager:
             "bytes_val": bytes,
             "float_val": float,
             "decimal_val": decimal_parse,
-            "leaflist_val": leaflist_parse,
+            "leaflist_val": leaf_list_parse,
             "json_val": json.loads,
             "json_ietf_val": json.loads,
             "ascii_val": str,
@@ -427,6 +430,22 @@ class gNMIManager:
         stream_mode: str,
         subscribe_mode: str,
     ) -> Iterable[ParsedResponse]:
+        """Subscribe to sensor path(s) and poll them at a given interval on a gNMI device
+
+                :param encoding: The encoding to use when you subscribe to a gNMI device
+                :type encoding: str
+                :param requests: A list of sensor path(s) to subscribe to
+                :type requests: List[str]
+                :param sample_rate: How often to poll the subscription in seconds
+                :type sample_rate: int
+                :param stream_mode: The way to stream off the data either STREAM, ONCE, POLL
+                :type stream_mode: str
+                :param subscribe_mode: Either can be SAMPLE or ON_CHANGE to either do MDT at a sample interval or EDT
+                :type subscribe_mode: str
+
+                :returns: An iterable of ParsedResponse of the streaming data
+
+                """
         subs = []
         sample_rate = sample_rate * 1000000000
         for request in requests:
@@ -450,11 +469,9 @@ class gNMIManager:
             ):
                 if not response.sync_response:
                     for update in response.update.update:
-                        parsed_dict = {}
-                        parsed_dict["@timestamp"] = (
-                            int(response.update.timestamp) / 1000000
-                        )
-                        parsed_dict["byte_size"] = response.ByteSize()
+                        parsed_dict = {"@timestamp": (
+                                int(response.update.timestamp) / 1000000
+                        ), "byte_size": response.ByteSize()}
                         keys, start_yang_path = self.process_header(response.update)
                         parsed_dict["keys"] = keys
                         rc = []
@@ -468,4 +485,4 @@ class gNMIManager:
                         parsed_dict["yang_path"] = total_yang_path
                         yield ParsedResponse(parsed_dict, self.version, self.hostname)
         except Exception as e:
-            raise GNMIException("Failed to complete Subscription")
+            raise GNMIException(f"Failed to complete Subscription:\n {e}")

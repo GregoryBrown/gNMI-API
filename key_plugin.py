@@ -1,11 +1,9 @@
 import optparse
 import sys
-import re
 import json
 
 from pyang import plugin
 from pyang import statements
-from tree import TreePlugin
 
 
 def pyang_plugin_init():

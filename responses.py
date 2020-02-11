@@ -7,7 +7,7 @@
 
 """
 from protos.gnmi_pb2 import GetResponse, SetRequest, Update, Path, TypedValue
-from typing import List, Set, Dict, Tuple, Union, Any
+from typing import List, Dict, Any
 from utils import create_gnmi_path
 import json
 
@@ -16,42 +16,40 @@ class ParsedSetRequest:
     """ParsedSetRequest creates the Set requests for all options (replace, update, delete)
 
     :param configs: The configuration dictionary that you want to parse into Set Requests
-    :type configs: SetRequest
+    :type configs: Dict[str, Any]
 
     """
 
     def __init__(self, configs: Dict[str, Any]):
-        self._features = configs
-        self.delete_request = SetRequest(delete=self._create_delete_paths())
-        self.update_request = SetRequest(update=self._create_updates())
-        self.replace_request = SetRequest(replace=self._create_updates())
+        self._features: Dict[str, Any] = configs
+        self.delete_request: SetRequest = SetRequest(delete=self._create_delete_paths())
+        self.update_request: SetRequest = SetRequest(update=self._create_updates())
+        self.replace_request: SetRequest = SetRequest(replace=self._create_updates())
 
     def _create_delete_paths(self) -> List[Path]:
-        paths = []
+        paths: List[Path] = []
         for key in self._features.keys():
             paths.append(create_gnmi_path(key))
         return paths
 
     def _create_updates(self) -> List[Update]:
-        updates = []
+        updates: List[Update] = []
         for path, config in self._features.items():
-            str_config = json.dumps(config)
-            type_config_val = TypedValue(json_ietf_val=str_config.encode())
+            str_config: str = json.dumps(config)
+            type_config_val: TypedValue = TypedValue(json_ietf_val=str_config.encode())
             updates.append(Update(path=create_gnmi_path(path), val=type_config_val))
         return updates
 
 
 class ParsedResponse:
-    """ParsedGetResponse uses the Get Response and parses it into version, hostname, and reponse to be uploaded.
+    """ParsedResponse uses the response and parses it into version, hostname, and response to be uploaded.
 
-    :param response: The configuration or operational Get response that was requested from the gNMI device.
-    :type response: GetResponse.
+    :param response: The configuration or operational response that was requested from the gNMI device.
+    :type response: Dict[str, Any]
     :param version: The version operational Get response of the gNMI device.
     :type version: GetResponse.
     :param hostname: The hostname of the gNMI device
     :type hostname: GetResponse
-    :param config_model: The single model that can be polled from the gNMI device
-    :type config_model: str
     :returns:  None
 
     """
