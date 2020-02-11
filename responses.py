@@ -54,9 +54,7 @@ class ParsedResponse:
 
     """
 
-    def __init__(
-        self, response: Dict[str, Any], version: GetResponse, hostname: GetResponse,
-    ) -> None:
+    def __init__(self, response: Dict[str, Any], version: GetResponse, hostname: GetResponse,) -> None:
         self.version: str = version
         self.hostname: str = hostname
         self.dict_to_upload: Dict[str, Any] = response

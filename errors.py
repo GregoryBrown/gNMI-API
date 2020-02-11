@@ -7,6 +7,8 @@
 
 
 """
+
+
 class GNMIException(Exception):
     """ Exception for GNMI API Errors """
 

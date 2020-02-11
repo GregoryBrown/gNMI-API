@@ -21,10 +21,7 @@ class KeysPlugin(plugin.PyangPlugin):
     def add_opts(self, optparser):
         optlist = [
             optparse.make_option(
-                "--keys-help",
-                dest="keys_help",
-                action="store_true",
-                help="Print help for keys output and exit",
+                "--keys-help", dest="keys_help", action="store_true", help="Print help for keys output and exit",
             )
         ]
         g = optparser.add_option_group("Keys output specific options")
@@ -53,9 +50,7 @@ class KeysPlugin(plugin.PyangPlugin):
     def recurse_on_container(self, module, keywords):
         try:
             for child in module.i_children:
-                if isinstance(child, statements.ContainerStatement) or isinstance(
-                    child, statements.ListStatement
-                ):
+                if isinstance(child, statements.ContainerStatement) or isinstance(child, statements.ListStatement):
                     if isinstance(child, statements.ListStatement):
                         rc = child.search("key")
                         if rc:

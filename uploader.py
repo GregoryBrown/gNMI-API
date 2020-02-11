@@ -37,9 +37,7 @@ class ElasticSearchUploader:
         """
         headers = {"Content-Type": "application/json"}
         mapping = {"mappings": {"properties": {"@timestamp": {"type": "date"}}}}
-        index_put_response = request(
-            "PUT", f"{self.url}/{index}", headers=headers, json=mapping
-        )
+        index_put_response = request("PUT", f"{self.url}/{index}", headers=headers, json=mapping)
 
         if not index_put_response.status_code == 200:
             print(index_put_response.json())
@@ -55,9 +53,7 @@ class ElasticSearchUploader:
         index_list: List[str] = []
         get_response = request("GET", f"{self.url}/*")
         if not get_response.status_code == 200:
-            raise ElasticSearchUploaderException(
-                "Unable to get index list from ElasticSearch"
-            )
+            raise ElasticSearchUploaderException("Unable to get index list from ElasticSearch")
         for key in get_response.json():
             if not key.startswith("."):
                 index_list.append(key)
@@ -74,16 +70,10 @@ class ElasticSearchUploader:
 
         """
         headers = {"Content-Type": "application/json"}
-        post_data = dict(
-            {"host": data.hostname, "version": data.version}, **data.dict_to_upload
-        )
-        post_response = request(
-            "POST", f"{self.url}/{index}/_doc", json=post_data, headers=headers,
-        )
+        post_data = dict({"host": data.hostname, "version": data.version}, **data.dict_to_upload)
+        post_response = request("POST", f"{self.url}/{index}/_doc", json=post_data, headers=headers,)
         if post_response.status_code not in [200, 201]:
-            raise ElasticSearchUploaderException(
-                "Error while posting data to ElasticSearch"
-            )
+            raise ElasticSearchUploaderException("Error while posting data to ElasticSearch")
 
     def upload(self, data: List[ParsedResponse]):
         """Upload operation data into Elasticsearch
@@ -101,9 +91,7 @@ class ElasticSearchUploader:
                 index_list.append(index)
             self._post_parsed_response(parsed_response, index)
 
-    def download(
-            self, hostname: str, version: str, configlet: str = None, last: int = 1
-    ) -> ParsedSetRequest:
+    def download(self, hostname: str, version: str, configlet: str = None, last: int = 1) -> ParsedSetRequest:
         """Download a configuration from Elasticsearch
 
         :param hostname: The hostname to query 
@@ -136,20 +124,14 @@ class ElasticSearchUploader:
             feature_list = [configlet]
         else:
             post_response = request(
-                "POST",
-                f"{self.url}/router-configs-gnmi*/_search",
-                json=search_request,
-                headers=headers,
+                "POST", f"{self.url}/router-configs-gnmi*/_search", json=search_request, headers=headers,
             )
             rc = post_response.json()
             feature_list: List = rc["hits"]["hits"][-1]["_source"]["content"]["configs"]
         feature_dict = {}
         for feature in feature_list:
             post_response = request(
-                "POST",
-                f"{self.url}/{yang_path_to_es_index(feature)}*/_search",
-                json=search_request,
-                headers=headers,
+                "POST", f"{self.url}/{yang_path_to_es_index(feature)}*/_search", json=search_request, headers=headers,
             )
             rc = post_response.json()
             feature_dict[feature] = rc["hits"]["hits"][-1]["_source"]["content"]

@@ -41,14 +41,7 @@ def get_date() -> str:
 
 
 def yang_path_to_es_index(name):
-    index: str = (
-        name.replace("/", "-")
-        .lower()
-        .replace(":", "-")
-        .replace("[", "-")
-        .replace("]", "")
-        .replace('"', "")
-    )
+    index: str = (name.replace("/", "-").lower().replace(":", "-").replace("[", "-").replace("]", "").replace('"', ""))
     date: str = get_date()
     size_of_date: int = sys.getsizeof(date)
     while sys.getsizeof(index) + size_of_date > 255:
