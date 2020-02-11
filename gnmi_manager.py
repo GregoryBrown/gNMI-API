@@ -68,6 +68,7 @@ class GNMIManager:
         ]
         self._connected: bool = False
         self.channel = None
+        self.gnmi_stub = None
         self.pem_bytes: bytes = b""
         if pem is not None:
             with open(pem, "rb") as fp:
@@ -362,7 +363,6 @@ class GNMIManager:
             "ascii_val": str,
             "proto_bytes": bytes,
         }
-        print(type_value)
         func = value_encodings[value_type]
         return func(getattr(type_value, value_type))
 
