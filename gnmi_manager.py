@@ -352,7 +352,7 @@ class GNMIManager:
             return value.digits
 
         def int_parse(value):
-            if value > sys.maxsize:
+            if value > 2**63-1:
                 value = str(value)
             return value
 
