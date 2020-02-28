@@ -359,7 +359,7 @@ class GNMIManager:
         value_encodings = {
             "string_val": str,
             "int_val": int_parse,
-            "uint_val": int,
+            "uint_val": int_parse,
             "bool_val": bool,
             "bytes_val": bytes,
             "float_val": float,
