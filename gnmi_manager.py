@@ -7,6 +7,8 @@
 
 
 """
+
+import sys
 import grpc
 from protos.gnmi_pb2_grpc import gNMIStub
 from protos.gnmi_pb2 import (
@@ -349,9 +351,14 @@ class GNMIManager:
         def decimal_parse(value):
             return value.digits
 
+        def int_parse(value):
+            if value > sys.maxsize:
+                value = str(value)
+            return value
+
         value_encodings = {
             "string_val": str,
-            "int_val": int,
+            "int_val": int_parse,
             "uint_val": int,
             "bool_val": bool,
             "bytes_val": bytes,
