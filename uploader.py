@@ -7,6 +7,7 @@
 
 
 """
+import json
 from responses import ParsedResponse, ParsedSetRequest
 from typing import List, Dict, Any
 from requests import request
@@ -27,39 +28,7 @@ class ElasticSearchUploader:
     def __init__(self, elastic_server: str, elastic_port: str) -> None:
         self.url: str = f"http://{elastic_server}:{elastic_port}"
 
-    def _put_index(self, index: str) -> None:
-        """Put an index into the ElasticSearch instance
-
-        :param index: The index name to put into the ES instance, formatted for ES 7.0+
-        :type index: str
-        :raises: ElasticSearchUploaderException
-
-        """
-        headers = {"Content-Type": "application/json"}
-        mapping = {"mappings": {"properties": {"@timestamp": {"type": "date"}}}}
-        index_put_response = request("PUT", f"{self.url}/{index}", headers=headers, json=mapping)
-
-        if not index_put_response.status_code == 200:
-            print(index_put_response.json())
-            raise ElasticSearchUploaderException(f"Error putting {index} in ES")
-
-    def _populate_index_list(self) -> List[str]:
-        """Query the Elasticsearch for all of the indices
-
-        :returns: List of the indices in the Elastic Search instance
-        :raises: ElasticSearchUploaderException
-
-        """
-        index_list: List[str] = []
-        get_response = request("GET", f"{self.url}/*")
-        if not get_response.status_code == 200:
-            raise ElasticSearchUploaderException("Unable to get index list from ElasticSearch")
-        for key in get_response.json():
-            if not key.startswith("."):
-                index_list.append(key)
-        return index_list
-
-    def _post_parsed_response(self, data: ParsedResponse, index: str) -> None:
+    def _post_parsed_response(self, data: str) -> None:
         """ Post data to an ES instance with a given index
 
         :param data: The data you want to post
@@ -69,9 +38,11 @@ class ElasticSearchUploader:
         :raises: ElasticSearchUploaderException
 
         """
-        headers = {"Content-Type": "application/json"}
-        post_data = dict({"host": data.hostname, "version": data.version}, **data.dict_to_upload)
-        post_response = request("POST", f"{self.url}/{index}/_doc", json=post_data, headers=headers,)
+        headers: Dict[str, Any] = {"Content-Type": "application/x-ndjson"}
+        post_response = request("POST", f"{self.url}/_bulk", data=data, headers=headers)
+        # headers = {"Content-Type": "application/json"}
+        # post_data = dict({"host": data.hostname, "version": data.version}, **data.dict_to_upload)
+        # post_response = request("POST", f"{self.url}/{index}/_doc", json=post_data, headers=headers,)
         if post_response.status_code not in [200, 201]:
             raise ElasticSearchUploaderException("Error while posting data to ElasticSearch")
 
@@ -82,14 +53,17 @@ class ElasticSearchUploader:
         :type data: List[ParsedGetResponse]
 
         """
-        index_list: List[str] = self._populate_index_list()
+        payload_list: List[Dict[str, Any]] = []
         for parsed_response in data:
             index = parsed_response.dict_to_upload.pop("index")
-            if index not in index_list:
-                print(f"Putting {index} in Elasticsearch")
-                self._put_index(index)
-                index_list.append(index)
-            self._post_parsed_response(parsed_response, index)
+            elastic_index = {"index": {"_index": f"{index}"}}
+            payload_list.append(elastic_index)
+            parsed_response.dict_to_upload["host"] = parsed_response.hostname
+            parsed_response.dict_to_upload["version"] = parsed_response.version
+            payload_list.append(parsed_response.dict_to_upload)
+        data_to_post: str = "\n".join(json.dumps(d) for d in payload_list)
+        data_to_post += "\n"
+        self._post_parsed_response(data_to_post)
 
     def download(self, hostname: str, version: str, configlet: str = None, last: int = 1) -> ParsedSetRequest:
         """Download a configuration from Elasticsearch
