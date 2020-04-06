@@ -216,7 +216,15 @@ class GNMIManager:
                 full_config_response: GetResponse = stub.Get(get_message, metadata=self.metadata)
                 split_full_config_response: List[Dict[str, Any]] = self._split_full_config(full_config_response)
                 for response in split_full_config_response:
-                    responses.append(ParsedResponse(response, version, hostname))
+                    parsed_dict: Dict[str, Any] = {
+                        "@timestamp": (int(response.notification[0].timestamp) / 1000000),
+                        "byte_size": response.ByteSize(),
+                    }
+                    model = response.notification[0].update[0].path.elem[0].name
+                    parsed_dict["model"] = model
+                    parsed_dict["index"] = yang_path_to_es_index(model)
+                    parsed_dict["config"] = json.loads(response.notification[0].update[0].val.json_ietf_val)
+                    responses.append(ParsedResponse(parsed_dict, version, hostname))
             return responses
         except Exception as e:
             raise GNMIException(f"Failed to complete the Get Config:\n {e}")
