@@ -261,64 +261,62 @@ class GNMIManager:
         """
         try:
             stub: gNMIStub = self._get_stub()
+            paths: List[Path] = []
             for oper_model in oper_models:
-                get_message: GetRequest = GetRequest(
-                    path=[create_gnmi_path(oper_model)],
-                    type=GetRequest.DataType.Value("OPERATIONAL"),
-                    encoding=Encoding.Value(encoding),
-                )
-                response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-                rc: List[ParsedResponse] = []
-                for notification in response.notification:
-                    start_yang_path: List[str] = []
-                    start_yang_keys: Dict[str, str] = {}
-                    sub_yang_path: List[str] = []
-                    sub_yang_info: List[Dict[str, Any]] = []
-                    for update in notification.update:
-                        for elem in update.path.elem:
-                            start_yang_path.append(elem.name)
-                            if elem.key:
-                                for key, value in elem.key.items():
-                                    if isinstance(value, str):
-                                        start_yang_keys[key] = value.replace('"', "").replace("'", "")
-                                    else:
-                                        start_yang_keys[key] = value
-                        keywords = self.yang_keywords[start_yang_path[0].split(":")[0]]
-                        start_yang_path: str = "/".join(start_yang_path)
-                        response_value: Any = self.get_value(update.val)
-                        if update.val.WhichOneof("value") in [
-                            "json_val",
-                            "json_ietf_val",
-                        ]:
-                            if isinstance(response_value, list):
-                                for sub_response_value in response_value:
-                                    for key, value in sub_response_value.items():
-                                        self._walk_yang_data(
-                                            sub_yang_path, key, value, keywords, start_yang_keys, sub_yang_info,
-                                        )
-                            else:
-                                for key, value in response_value.items():
+                paths.append(create_gnmi_path(oper_model))
+            get_message: GetRequest = GetRequest(
+                path=paths,
+                type=GetRequest.DataType.Value("OPERATIONAL"),
+                encoding=Encoding.Value(encoding),
+            )
+            response: GetResponse = stub.Get(get_message, metadata=self.metadata)
+            rc: List[ParsedResponse] = []
+            for notification in response.notification:
+                start_yang_path: List[str] = []
+                start_yang_keys: Dict[str, str] = {}
+                sub_yang_path: List[str] = []
+                sub_yang_info: List[Dict[str, Any]] = []
+                for update in notification.update:
+                    for elem in update.path.elem:
+                        start_yang_path.append(elem.name)
+                        if elem.key:
+                            for key, value in elem.key.items():
+                                if isinstance(value, str):
+                                    start_yang_keys[key] = value.replace('"', "").replace("'", "")
+                                else:
+                                    start_yang_keys[key] = value
+                    keywords = self.yang_keywords[start_yang_path[0].split(":")[0]]
+                    start_yang_path: str = "/".join(start_yang_path)
+                    response_value: Any = self.get_value(update.val)
+                    if update.val.WhichOneof("value") in ["json_val", "json_ietf_val"]:
+                        if isinstance(response_value, list):
+                            for sub_response_value in response_value:
+                                for key, value in sub_response_value.items():
                                     self._walk_yang_data(
                                         sub_yang_path, key, value, keywords, start_yang_keys, sub_yang_info,
                                     )
-
-                            for sub_yang in sub_yang_info:
-                                parsed_dict = {
-                                    "@timestamp": (int(notification.timestamp) / 1000000),
-                                    "byte_size": response.ByteSize(),
-                                    "keys": sub_yang["keys"],
-                                }
-                                yang_path = sub_yang["yang_path"]
-                                parsed_dict["yang_path"] = f"{start_yang_path}/{yang_path}"
-                                leaf = "-".join(parsed_dict["yang_path"].split("/")[-2:])
-                                parsed_dict[leaf] = sub_yang["value"]
-                                parsed_dict["index"] = yang_path_to_es_index(parsed_dict["yang_path"])
-                                rc.append(ParsedResponse(parsed_dict, self.version, self.hostname))
                         else:
-                            raise GNMIException("Unsupported Get encoding")
-                return rc
-        except Exception as e:
-            raise GNMIException(f"Failed to complete the Get:\n {e}")
+                            for key, value in response_value.items():
+                                self._walk_yang_data(
+                                    sub_yang_path, key, value, keywords, start_yang_keys, sub_yang_info,
+                                )
+                        for sub_yang in sub_yang_info:
+                            parsed_dict = {
+                                "@timestamp": (int(notification.timestamp) / 1000000),
+                                "byte_size": response.ByteSize(),
+                                "keys": sub_yang["keys"],
+                            }
+                            yang_path = sub_yang["yang_path"]
+                            parsed_dict["yang_path"] = f"{start_yang_path}/{yang_path}"
+                            leaf = "-".join(parsed_dict["yang_path"].split("/")[-2:])
+                            parsed_dict[leaf] = sub_yang["value"]
+                            parsed_dict["index"] = yang_path_to_es_index(parsed_dict["yang_path"])
+                            rc.append(ParsedResponse(parsed_dict, self.version, self.hostname))
+                    else:
+                        raise GNMIException("Unsupported Get encoding")
+            return rc
+        except Exception as error:
+            raise GNMIException(f"Failed to complete the Get:\n {error}")
 
     def set(self, request: SetRequest) -> SetResponse:
         """Set configuration on a gNMI device
