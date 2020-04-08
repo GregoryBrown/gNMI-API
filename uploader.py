@@ -8,9 +8,10 @@
 
 """
 import json
+import gzip
 from responses import ParsedResponse, ParsedSetRequest
 from typing import List, Dict, Any
-from requests import request
+from requests import request, Response
 from utils import yang_path_to_es_index
 from errors import ElasticSearchUploaderException
 
@@ -38,11 +39,10 @@ class ElasticSearchUploader:
         :raises: ElasticSearchUploaderException
 
         """
-        headers: Dict[str, Any] = {"Content-Type": "application/x-ndjson"}
-        post_response = request("POST", f"{self.url}/_bulk", data=data, headers=headers)
-        # headers = {"Content-Type": "application/json"}
-        # post_data = dict({"host": data.hostname, "version": data.version}, **data.dict_to_upload)
-        # post_response = request("POST", f"{self.url}/{index}/_doc", json=post_data, headers=headers,)
+
+        headers: Dict[str, Any] = {"Content-Encoding": "gzip", "Content-Type": "application/x-ndjson"}
+        data_to_post: bytes = gzip.compress(data.encode("utf-8"))
+        post_response: Response = request("POST", f"{self.url}/_bulk", data=data_to_post, headers=headers)
         if post_response.status_code not in [200, 201]:
             raise ElasticSearchUploaderException("Error while posting data to ElasticSearch")
 
@@ -55,8 +55,8 @@ class ElasticSearchUploader:
         """
         payload_list: List[Dict[str, Any]] = []
         for parsed_response in data:
-            index = parsed_response.dict_to_upload.pop("index")
-            elastic_index = {"index": {"_index": f"{index}"}}
+            index: str = parsed_response.dict_to_upload.pop("index")
+            elastic_index: Dict[str, Any] = {"index": {"_index": f"{index}"}}
             payload_list.append(elastic_index)
             parsed_response.dict_to_upload["host"] = parsed_response.hostname
             parsed_response.dict_to_upload["version"] = parsed_response.version
