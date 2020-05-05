@@ -350,7 +350,7 @@ class GNMIManager:
             value_list = []
             for element in value.element:
                 value_type_leaf_parse = element.WhichOneof("value")
-                func_leaf_parse = value_encodings[value_type]
+                func_leaf_parse = value_encodings[value_type_leaf_parse]
                 value_list.append(func_leaf_parse(getattr(element, value_type_leaf_parse)))
             return value_list
 
