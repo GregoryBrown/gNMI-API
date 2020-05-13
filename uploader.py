@@ -42,6 +42,7 @@ class ElasticSearchUploader:
 
         headers: Dict[str, Any] = {"Content-Encoding": "gzip", "Content-Type": "application/x-ndjson"}
         data_to_post: bytes = gzip.compress(data.encode("utf-8"))
+
         post_response: Response = request("POST", f"{self.url}/_bulk", data=data_to_post, headers=headers)
         if post_response.status_code not in [200, 201]:
             raise ElasticSearchUploaderException("Error while posting data to ElasticSearch")

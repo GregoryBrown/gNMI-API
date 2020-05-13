@@ -286,7 +286,7 @@ class GNMIManager:
                                 else:
                                     start_yang_keys[key] = value
                     keywords = self.yang_keywords[start_yang_path[0].split(":")[0]]
-                    start_yang_path: str = "/".join(start_yang_path)
+                    start_yang_path_str: str = "/".join(start_yang_path)
                     response_value: Any = self.get_value(update.val)
                     if update.val.WhichOneof("value") in ["json_val", "json_ietf_val"]:
                         if isinstance(response_value, list):
@@ -307,7 +307,7 @@ class GNMIManager:
                                 "keys": sub_yang["keys"],
                             }
                             yang_path = sub_yang["yang_path"]
-                            parsed_dict["yang_path"] = f"{start_yang_path}/{yang_path}"
+                            parsed_dict["yang_path"] = f"{start_yang_path_str}/{yang_path}"
                             leaf = "-".join(parsed_dict["yang_path"].split("/")[-2:])
                             parsed_dict[leaf] = sub_yang["value"]
                             parsed_dict["index"] = yang_path_to_es_index(parsed_dict["yang_path"])
