@@ -336,9 +336,9 @@ class GNMIManager:
             raise GNMIException(f"Failed to complete the Set:\n {e}")
 
     @staticmethod
-    def process_header(header):
-        keys = {}
-        yang_path = []
+    def process_header(header: Update) -> Tuple[Dict[str, str], str]:
+        keys: Dict[str, str] = {}
+        yang_path: List[str] = []
         for elem in header.prefix.elem:
             yang_path.append(elem.name)
             if elem.key:
@@ -386,6 +386,16 @@ class GNMIManager:
     def sub_to_path(request: SetRequest) -> SetRequest:
         yield request
 
+    @staticmethod
+    def process_update_header(update: Update) -> Tuple[Dict[str, str], str]:
+        update_keys: Dict[str, str] = {}
+        yang_path: List[str] = []
+        for elem in update.path.elem:
+            yang_path.append(elem.name)
+            if elem.key:
+                update_keys.update(elem.key)
+        return update_keys, f"{'/'.join(yang_path)}"
+
     def subscribe(
         self, encoding: str, requests: List[str], sample_rate: int, stream_mode: str, subscribe_mode: str,
     ) -> Iterable[ParsedResponse]:
@@ -423,19 +433,18 @@ class GNMIManager:
             stub = self._get_stub()
             for response in stub.Subscribe(self.sub_to_path(sub_request), metadata=self.metadata):
                 if not response.sync_response:
+                    keys, start_yang_path = self.process_header(response.update)
                     for update in response.update.update:
+                        update_keys, update_yang_path = self.process_update_header(update)
+                        total_yang_path = f"{start_yang_path}/{update_yang_path}"
+                        value = self.get_value(update.val)
                         parsed_dict = {
                             "@timestamp": (int(response.update.timestamp) / 1000000),
                             "byte_size": response.ByteSize(),
                             "ip": self.host,
                         }
-                        keys, start_yang_path = self.process_header(response.update)
+                        keys.update(update_keys)
                         parsed_dict["keys"] = keys
-                        rc = []
-                        value = self.get_value(update.val)
-                        for elem in update.path.elem:
-                            rc.append(elem.name)
-                        total_yang_path = f"{start_yang_path}/{'/'.join(rc)}"
                         leaf = "-".join(total_yang_path.split("/")[-2:])
                         parsed_dict[leaf] = value
                         parsed_dict["index"] = yang_path_to_es_index(total_yang_path)
