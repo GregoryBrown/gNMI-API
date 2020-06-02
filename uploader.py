@@ -85,7 +85,7 @@ class ElasticSearchUploader:
                 "bool": {
                     "must": [{"match_all": {}}],
                     "filter": [
-                        {"match_phrase": {"version": {"query": f"{version}"}}},
+                        # {"match_phrase": {"version": {"query": f"{version}"}}},
                         {"match_phrase": {"host": {"query": f"{hostname}"}}},
                     ],
                 }
@@ -109,5 +109,6 @@ class ElasticSearchUploader:
                 "POST", f"{self.url}/{yang_path_to_es_index(feature)}*/_search", json=search_request, headers=headers,
             )
             rc = post_response.json()
-            feature_dict[feature] = rc["hits"]["hits"][-1]["_source"]["content"]
+            print(rc)
+            feature_dict[feature] = rc["hits"]["hits"][-1]["_source"]["config"]
         return ParsedSetRequest(feature_dict)

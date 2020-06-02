@@ -34,7 +34,10 @@ class ParsedSetRequest:
 
     def _create_updates(self) -> List[Update]:
         updates: List[Update] = []
+        print(self._features)
         for path, config in self._features.items():
+            print(path)
+            print(config)
             str_config: str = json.dumps(config)
             type_config_val: TypedValue = TypedValue(json_ietf_val=str_config.encode())
             updates.append(Update(path=create_gnmi_path(path), val=type_config_val))
