@@ -223,6 +223,7 @@ class GNMIManager:
                 model = response.notification[0].update[0].path.elem[0].name
                 parsed_dict["model"] = model
                 parsed_dict["index"] = yang_path_to_es_index(model)
+                parsed_dict["ip"] = self.host
                 parsed_dict["config"] = json.loads(response.notification[0].update[0].val.json_ietf_val)
                 responses.append(ParsedResponse(parsed_dict, version, hostname))
             return responses
@@ -311,6 +312,7 @@ class GNMIManager:
                             parsed_dict["yang_path"] = f"{start_yang_path_str}/{yang_path}"
                             leaf = "-".join(parsed_dict["yang_path"].split("/")[-2:])
                             parsed_dict[leaf] = sub_yang["value"]
+                            parsed_dict["ip"] = self.host
                             parsed_dict["index"] = yang_path_to_es_index(parsed_dict["yang_path"])
                             rc.append(ParsedResponse(parsed_dict, self.version, self.hostname))
                     else:
@@ -425,6 +427,7 @@ class GNMIManager:
                         parsed_dict = {
                             "@timestamp": (int(response.update.timestamp) / 1000000),
                             "byte_size": response.ByteSize(),
+                            "ip": self.host,
                         }
                         keys, start_yang_path = self.process_header(response.update)
                         parsed_dict["keys"] = keys
