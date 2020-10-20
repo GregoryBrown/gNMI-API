@@ -52,7 +52,8 @@ class GNMIManager:
     """
 
     def __init__(
-        self, pem: str, host: str, username: str, password: str, port: str, keys_file: str = None, options=None,
+            self, host: str, username: str, password: str, port: str,
+            pem: str = None, keys_file: str = None, options=None,
     ) -> None:
         if options is None:
             options = [("grpc.ssl_target_name_override", "ems.cisco.com")]
@@ -95,7 +96,7 @@ class GNMIManager:
 
         """
         try:
-            if self.pem_bytes is None:
+            if self.pem_bytes == b"":
                 self.channel: grpc.insecure_channel = grpc.insecure_channel(
                     ":".join([self.host, self.port]), self.options
                 )
