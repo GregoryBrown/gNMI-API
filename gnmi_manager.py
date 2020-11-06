@@ -127,7 +127,9 @@ class GNMIManager:
     def _get_version(self) -> str:
         stub = self._get_stub()
         get_message: GetRequest = GetRequest(
-            path=[create_gnmi_path("openconfig-platform:components/component/state/software-version")],
+            # /component[name="Rack0"]/state/software-version')],
+            path=[create_gnmi_path(
+                'openconfig-platform:components')],
             type=GetRequest.DataType.Value("STATE"),
             encoding=Encoding.Value("JSON_IETF"),
         )
@@ -137,9 +139,13 @@ class GNMIManager:
             rc = ""
             for notification in version.notification:
                 for update in notification.update:
-                    rc = update.val.json_ietf_val
-                    rc = rc.decode().strip("}").strip('"')
-            return rc
+                    rc = json.loads(update.val.json_ietf_val)
+                    for state in rc["component"]:
+                        try:
+                            version = state["state"]["software-version"]
+                        except KeyError as error:
+                            continue
+            return version
 
         return _parse_version(response)
 
@@ -272,7 +278,6 @@ class GNMIManager:
                 encoding=Encoding.Value(encoding),
             )
             response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-            print(response)
             rc: List[ParsedResponse] = []
             for notification in response.notification:
                 start_yang_path: List[str] = []
