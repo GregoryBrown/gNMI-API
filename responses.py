@@ -28,19 +28,20 @@ class ParsedSetRequest:
 
     def _create_delete_paths(self) -> List[Path]:
         paths: List[Path] = []
-        for key in self._features.keys():
-            paths.append(create_gnmi_path(key))
+        for path in self._features.keys():
+            if not path == "":
+                paths.append(create_gnmi_path(path))
         return paths
-
+    
     def _create_updates(self) -> List[Update]:
         updates: List[Update] = []
-        print(self._features)
         for path, config in self._features.items():
-            print(path)
-            print(config)
             str_config: str = json.dumps(config)
             type_config_val: TypedValue = TypedValue(json_ietf_val=str_config.encode())
-            updates.append(Update(path=create_gnmi_path(path), val=type_config_val))
+            if path == "":
+                updates.append(Update(path=Path(), val=type_config_val))
+            else:
+                updates.append(Update(path=create_gnmi_path(path), val=type_config_val))
         return updates
 
 

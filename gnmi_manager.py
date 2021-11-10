@@ -127,26 +127,17 @@ class GNMIManager:
     def _get_version(self) -> str:
         stub = self._get_stub()
         get_message: GetRequest = GetRequest(
-            # /component[name="Rack0"]/state/software-version')],
-            path=[create_gnmi_path(
-                'openconfig-platform:components')],
+            path=[create_gnmi_path("Cisco-IOS-XR-install-oper:install/version")],
             type=GetRequest.DataType.Value("STATE"),
-            encoding=Encoding.Value("JSON_IETF"),
+            encoding=Encoding.Value("JSON_IETF")
         )
         response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-
         def _parse_version(version: GetResponse) -> str:
             rc = ""
             for notification in version.notification:
                 for update in notification.update:
                     rc = json.loads(update.val.json_ietf_val)
-                    for state in rc["component"]:
-                        try:
-                            version = state["state"]["software-version"]
-                        except KeyError as error:
-                            continue
-            return version
-
+                    return rc["package"][0]["version"]
         return _parse_version(response)
 
     def _get_hostname(self) -> str:
@@ -192,7 +183,7 @@ class GNMIManager:
         responses.append(GetResponse(notification=[notification]))
         return responses
 
-    def get_config(self, encoding: str, config_models: List[str] = None) -> List[ParsedResponse]:
+    def get_config(self, encoding: str, config_models: List[str] = None, raw: bool = False) -> List[ParsedResponse]:
         """Get configuration of the gNMI device
 
         :param encoding: The encoding to use to for the Get Config operation
@@ -209,19 +200,23 @@ class GNMIManager:
             responses: List[ParsedResponse] = []
             if config_models:
                 for config_model in config_models:
+                    split_full_config_response = []
                     get_message: GetRequest = GetRequest(
                         path=[create_gnmi_path(config_model)],
                         type=GetRequest.DataType.Value("CONFIG"),
                         encoding=Encoding.Value(encoding),
                     )
                     response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-                    split_full_config_response = [response]
+                    split_full_config_response.append(response)
             else:
                 get_message: GetRequest = GetRequest(
                     path=[Path()], type=GetRequest.DataType.Value("CONFIG"), encoding=Encoding.Value(encoding),
                 )
                 full_config_response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-                split_full_config_response: List[Dict[str, Any]] = self._split_full_config(full_config_response)
+                if raw:
+                    return full_config_response
+                else:
+                    split_full_config_response: List[Dict[str, Any]] = self._split_full_config(full_config_response)
             for response in split_full_config_response:
                 parsed_dict: Dict[str, Any] = {
                     "@timestamp": (int(response.notification[0].timestamp) / 1000000),
@@ -257,7 +252,7 @@ class GNMIManager:
             else:
                 leaves.append({"keys": key_temp, "yang_path": "/".join(yp), "value": in_value})
 
-    def get(self, encoding: str, oper_models: List[str]) -> List[ParsedResponse]:
+    def get(self, encoding: str, oper_models: List[str], raw: bool = False) -> List[ParsedResponse]:
         """Get oper data of a gNMI device
 
         :param encoding: The encoding to use to for the Get operation
@@ -278,49 +273,55 @@ class GNMIManager:
                 encoding=Encoding.Value(encoding),
             )
             response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-            rc: List[ParsedResponse] = []
-            for notification in response.notification:
-                start_yang_path: List[str] = []
-                start_yang_keys: Dict[str, str] = {}
-                sub_yang_path: List[str] = []
-                sub_yang_info: List[Dict[str, Any]] = []
-                for update in notification.update:
-                    for elem in update.path.elem:
-                        start_yang_path.append(elem.name)
-                        if elem.key:
-                            for key, value in elem.key.items():
-                                if isinstance(value, str):
-                                    start_yang_keys[key] = value.replace('"', "").replace("'", "")
-                                else:
-                                    start_yang_keys[key] = value
-                    keywords = self.yang_keywords[start_yang_path[0].split(":")[0]]
-                    start_yang_path_str: str = "/".join(start_yang_path)
-                    response_value: Any = self.get_value(update.val)
-                    if update.val.WhichOneof("value") in ["json_val", "json_ietf_val"]:
-                        if isinstance(response_value, list):
-                            for sub_response_value in response_value:
-                                for key, value in sub_response_value.items():
+            if raw:
+                return response
+            else:
+                rc: List[ParsedResponse] = []
+                for notification in response.notification:
+                    start_yang_path: List[str] = []
+                    start_yang_keys: Dict[str, str] = {}
+                    sub_yang_path: List[str] = []
+                    sub_yang_info: List[Dict[str, Any]] = []
+                    for update in notification.update:
+                        for elem in update.path.elem:
+                            start_yang_path.append(elem.name)
+                            if elem.key:
+                                for key, value in elem.key.items():
+                                    if isinstance(value, str):
+                                        start_yang_keys[key] = value.replace('"', "").replace("'", "")
+                                    else:
+                                        start_yang_keys[key] = value
+                        keywords = self.yang_keywords[start_yang_path[0].split(":")[0]]
+                        start_yang_path_str: str = "/".join(start_yang_path)
+                        response_value: Any = self.get_value(update.val)
+                        if update.val.WhichOneof("value") in ["json_val", "json_ietf_val"]:
+                            if response_value == "":
+                                rc.append(ParsedResponse({}, self.version, self.hostname))
+                                return rc
+                            if isinstance(response_value, list):
+                                for sub_response_value in response_value:
+                                    for key, value in sub_response_value.items():
+                                        self._walk_yang_data(
+                                            sub_yang_path, key, value, keywords, start_yang_keys, sub_yang_info,
+                                        )
+                            else:
+                                for key, value in response_value.items():
                                     self._walk_yang_data(
                                         sub_yang_path, key, value, keywords, start_yang_keys, sub_yang_info,
                                     )
-                        else:
-                            for key, value in response_value.items():
-                                self._walk_yang_data(
-                                    sub_yang_path, key, value, keywords, start_yang_keys, sub_yang_info,
-                                )
-                        for sub_yang in sub_yang_info:
-                            parsed_dict = {
-                                "@timestamp": (int(notification.timestamp) / 1000000),
-                                "byte_size": response.ByteSize(),
-                                "keys": sub_yang["keys"],
-                            }
-                            yang_path = sub_yang["yang_path"]
-                            parsed_dict["yang_path"] = f"{start_yang_path_str}/{yang_path}"
-                            leaf = "-".join(parsed_dict["yang_path"].split("/")[-2:])
-                            parsed_dict[leaf] = sub_yang["value"]
-                            parsed_dict["ip"] = self.host
-                            parsed_dict["index"] = yang_path_to_es_index(parsed_dict["yang_path"])
-                            rc.append(ParsedResponse(parsed_dict, self.version, self.hostname))
+                            for sub_yang in sub_yang_info:
+                                parsed_dict = {
+                                    "@timestamp": (int(notification.timestamp) / 1000000),
+                                    "byte_size": response.ByteSize(),
+                                    "keys": sub_yang["keys"],
+                                }
+                                yang_path = sub_yang["yang_path"]
+                                parsed_dict["yang_path"] = f"{start_yang_path_str}/{yang_path}"
+                                leaf = "-".join(parsed_dict["yang_path"].split("/")[-2:])
+                                parsed_dict[leaf] = sub_yang["value"]
+                                parsed_dict["ip"] = self.host
+                                parsed_dict["index"] = yang_path_to_es_index(parsed_dict["yang_path"])
+                                rc.append(ParsedResponse(parsed_dict, self.version, self.hostname))
                     else:
                         raise GNMIException("Unsupported Get encoding")
             return rc
@@ -386,8 +387,12 @@ class GNMIManager:
             "proto_bytes": bytes,
         }
         func = value_encodings[value_type]
-        return func(getattr(type_value, value_type))
+        if value_type.startswith("json") and getattr(type_value, value_type) == b"":
+            return ""
+        else:
+            return func(getattr(type_value, value_type))
 
+    
     @staticmethod
     def sub_to_path(request: SetRequest) -> SetRequest:
         yield request
