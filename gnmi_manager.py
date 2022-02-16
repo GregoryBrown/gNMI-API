@@ -194,8 +194,6 @@ class GNMIManager:
 
         """
         try:
-            version: GetResponse = self._get_version()
-            hostname: GetResponse = self._get_hostname()
             stub: gNMIStub = self._get_stub()
             responses: List[ParsedResponse] = []
             if config_models:
@@ -207,11 +205,15 @@ class GNMIManager:
                         encoding=Encoding.Value(encoding),
                     )
                     response: GetResponse = stub.Get(get_message, metadata=self.metadata)
-                    split_full_config_response.append(response)
+                    if raw:
+                        return response
+                    else: 
+                        split_full_config_response.append(response)
             else:
                 get_message: GetRequest = GetRequest(
                     path=[Path()], type=GetRequest.DataType.Value("CONFIG"), encoding=Encoding.Value(encoding),
                 )
+                print(get_message)
                 full_config_response: GetResponse = stub.Get(get_message, metadata=self.metadata)
                 if raw:
                     return full_config_response
@@ -322,8 +324,8 @@ class GNMIManager:
                                 parsed_dict["ip"] = self.host
                                 parsed_dict["index"] = yang_path_to_es_index(parsed_dict["yang_path"])
                                 rc.append(ParsedResponse(parsed_dict, self.version, self.hostname))
-                    else:
-                        raise GNMIException("Unsupported Get encoding")
+                        else:
+                            raise GNMIException("Unsupported Get encoding")
             return rc
         except Exception as error:
             raise GNMIException(f"Failed to complete the Get:\n {error}")
