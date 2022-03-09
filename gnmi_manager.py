@@ -229,7 +229,7 @@ class GNMIManager:
                 parsed_dict["index"] = yang_path_to_es_index(model)
                 parsed_dict["ip"] = self.host
                 parsed_dict["config"] = json.loads(response.notification[0].update[0].val.json_ietf_val)
-                responses.append(ParsedResponse(parsed_dict, version, hostname))
+                responses.append(ParsedResponse(parsed_dict, self.version, self.hostname))
             return responses
         except Exception as e:
             raise GNMIException(f"Failed to complete the Get Config:\n {e}")

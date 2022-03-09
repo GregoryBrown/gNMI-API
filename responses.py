@@ -7,7 +7,7 @@
 
 """
 from protos.gnmi_pb2 import GetResponse, SetRequest, Update, Path, TypedValue
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 from utils import create_gnmi_path
 import json
 
@@ -20,29 +20,42 @@ class ParsedSetRequest:
 
     """
 
-    def __init__(self, configs: Dict[str, Any]):
-        self._features: Dict[str, Any] = configs
+    def __init__(self, configs: Union[str, Dict[str, Any]]):
+        print(type(configs))
+        if isinstance(configs, str):
+            self.ascii_config: str = configs
+            self.path: Path = Path()
+            self.ascii_mode: bool = True
+        else:
+            self._features: Dict[str, Any] = configs
+            self.ascii_mode = False
         self.delete_request: SetRequest = SetRequest(delete=self._create_delete_paths())
         self.update_request: SetRequest = SetRequest(update=self._create_updates())
         self.replace_request: SetRequest = SetRequest(replace=self._create_updates())
 
     def _create_delete_paths(self) -> List[Path]:
         paths: List[Path] = []
-        for path in self._features.keys():
-            if not path == "":
-                paths.append(create_gnmi_path(path))
-        return paths
+        if not self.ascii_mode:
+            for path in self._features.keys():
+                if not path == "":
+                    paths.append(create_gnmi_path(path))
+            return paths
     
     def _create_updates(self) -> List[Update]:
         updates: List[Update] = []
-        for path, config in self._features.items():
-            str_config: str = json.dumps(config)
-            type_config_val: TypedValue = TypedValue(json_ietf_val=str_config.encode())
-            if path == "":
-                updates.append(Update(path=Path(), val=type_config_val))
-            else:
-                updates.append(Update(path=create_gnmi_path(path), val=type_config_val))
-        return updates
+        if self.ascii_mode:
+            type_config_val: TypedValue = TypedValue(ascii_val=self.ascii_config)
+            updates.append(Update(path=self.path, val=type_config_val))
+            return updates
+        else:
+            for path, config in self._features.items():
+                str_config: str = json.dumps(config)
+                type_config_val: TypedValue = TypedValue(json_ietf_val=str_config.encode())
+                if path == "":
+                    updates.append(Update(path=Path(), val=type_config_val))
+                else:
+                    updates.append(Update(path=create_gnmi_path(path), val=type_config_val))
+            return updates
 
 
 class ParsedResponse:
