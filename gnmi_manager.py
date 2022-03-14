@@ -213,7 +213,6 @@ class GNMIManager:
                 get_message: GetRequest = GetRequest(
                     path=[Path()], type=GetRequest.DataType.Value("CONFIG"), encoding=Encoding.Value(encoding),
                 )
-                print(get_message)
                 full_config_response: GetResponse = stub.Get(get_message, metadata=self.metadata)
                 if raw:
                     return full_config_response
@@ -293,7 +292,7 @@ class GNMIManager:
                                         start_yang_keys[key] = value.replace('"', "").replace("'", "")
                                     else:
                                         start_yang_keys[key] = value
-                        keywords = self.yang_keywords[start_yang_path[0].split(":")[0]]
+                        keywords = self.yang_keywords[start_yang_path[0].split(":")[0]]["keys"]
                         start_yang_path_str: str = "/".join(start_yang_path)
                         response_value: Any = self.get_value(update.val)
                         if update.val.WhichOneof("value") in ["json_val", "json_ietf_val"]:
