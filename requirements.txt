@@ -3,7 +3,7 @@ charset-normalizer==2.0.11
 googleapis-common-protos==1.54.0
 grpcio==1.43.0
 idna==3.3
-lxml==4.7.1
+lxml==4.9.1
 pkg_resources==0.0.0
 protobuf==3.19.4
 pyang==2.5.2
