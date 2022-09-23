@@ -5,7 +5,7 @@ grpcio==1.43.0
 idna==3.3
 lxml==4.7.1
 pkg_resources==0.0.0
-protobuf==3.19.4
+protobuf==3.19.5
 pyang==2.5.2
 requests==2.27.1
 six==1.16.0
